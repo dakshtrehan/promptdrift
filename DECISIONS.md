@@ -259,3 +259,19 @@ public replacements listed in the README.
   (`dynamic = ["version"]`). Build backend raised to setuptools>=77 to use the
   SPDX `license = "MIT"` field; the deprecated license classifier was removed
   because setuptools rejects having both.
+
+## D11. Build and release (task 11)
+
+* Built sdist and wheel with `python -m build`; `twine check --strict` passes for
+  both. The wheel was installed into a clean venv and run outside the repo; the
+  unpacked sdist's own test suite passes.
+* Added `MANIFEST.in` because the sdist shipped `tests/test_*.py` without
+  `tests/conftest.py` and `tests/__init__.py`, so tests from the sdist failed
+  to import. It also ships `CHANGELOG.md` and `examples/`.
+* `dist/` stays git-ignored; RELEASE.md rebuilds from a clean `main` so the
+  uploaded files match the merged code exactly.
+* Nothing was uploaded. Checked (read-only GET) that `promptdrift`,
+  `prompt-drift` and `prompt_drift` are unclaimed on PyPI and TestPyPI.
+* The existing `publish.yml` (trusted publishing on GitHub Release) was left in
+  place. RELEASE.md explains that it conflicts with a manual token upload of the
+  same version if a GitHub Release is also published, and how to choose one route.
