@@ -10,7 +10,7 @@ from itertools import combinations
 
 from .checks import check_flip, normalize_checks, run_checks
 from .core import CaseResult, classify_drift
-from .judge import judge_pair
+from .judge import judge_both_orders as judge_two_orders, judge_pair
 from .similarity import text_similarity
 from .structure import structural_diff
 
@@ -66,6 +66,7 @@ def score_case(
     tokens_a: int = 0,
     tokens_b: int = 0,
     default_checks=None,
+    judge_both_orders: bool = True,
 ) -> CaseResult:
     """Score one case.
 
@@ -75,7 +76,8 @@ def score_case(
     noise floor. Structure, judge and the per-case outputs use the first sample.
 
     ``case`` needs ``id``; ``input`` and ``expected`` are optional context.
-    ``judge`` is a provider used as LLM judge, or ``None`` to skip judging.
+    ``judge`` is a provider used as LLM judge, or ``None`` to skip judging. It
+    runs in both orders unless ``judge_both_orders`` is False.
     ``embedder`` is a provider with ``embed``, or ``None`` for TF-IDF.
     ``case["checks"]`` (or ``default_checks`` when the case has none) are
     deterministic checks run on every sample; a side passes when at least half
@@ -129,9 +131,17 @@ def score_case(
         }
 
     verdict, reasoning = None, None
+    jinfo = {}
     if judge is not None and level != "none":
-        verdict, reasoning = judge_pair(judge, case.get("input", ""), first_a, first_b,
-                                        expected=case.get("expected"))
+        if judge_both_orders:
+            j = judge_two_orders(judge, case.get("input", ""), first_a, first_b,
+                                 expected=case.get("expected"))
+            verdict, reasoning = j["verdict"], j["reasoning"]
+            jinfo = {"judge_verdict_ab": j["verdict_ab"], "judge_verdict_ba": j["verdict_ba"],
+                     "judge_consistent": j["consistent"]}
+        else:
+            verdict, reasoning = judge_pair(judge, case.get("input", ""), first_a, first_b,
+                                            expected=case.get("expected"))
         if verdict == "regressed":
             level = "regression"
     if flip == "pass_to_fail":
@@ -156,4 +166,5 @@ def score_case(
         **structural_diff(first_a, first_b),
         **chk,
         **stab,
+        **jinfo,
     )

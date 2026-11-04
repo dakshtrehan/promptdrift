@@ -26,6 +26,7 @@ def cmd_compare(args):
             use_judge=not args.no_judge,
             judge_provider=args.judge_provider,
             judge_model=args.judge_model,
+            judge_both_orders=not args.judge_single_order,
             verbose=not args.quiet,
             checks=_load_checks(args.checks),
             samples=args.samples,
@@ -76,6 +77,7 @@ def cmd_diff(args):
             use_judge=args.judge,
             judge_provider=args.judge_provider,
             judge_model=args.judge_model,
+            judge_both_orders=not args.judge_single_order,
             checks=_load_checks(args.checks),
             bootstrap=args.bootstrap,
             seed=args.seed,
@@ -154,6 +156,16 @@ def _load_checks(path):
     return spec
 
 
+def _add_judge_args(p):
+    p.add_argument("--judge-provider", default=None,
+                   help="openai | anthropic | ollama (default: from OPENAI_API_KEY, "
+                        "else ANTHROPIC_API_KEY)")
+    p.add_argument("--judge-model", default=None,
+                   help="Judge model (default depends on the provider)")
+    p.add_argument("--judge-single-order", action="store_true",
+                   help="Judge A-vs-B only (v0.1.1 behaviour) instead of both orders")
+
+
 def _add_output_args(p):
     p.add_argument("--bootstrap", type=int, default=1000, metavar="N",
                    help="Bootstrap resamples for 95%% CIs (default 1000, 0 disables)")
@@ -192,8 +204,7 @@ examples:
     cp.add_argument("config_b", help="New prompt config (YAML/JSON)")
     cp.add_argument("--cases", required=True, help="Test cases file (JSON/JSONL/YAML)")
     cp.add_argument("--no-judge", action="store_true", help="Skip LLM-as-judge (embedding only, faster)")
-    cp.add_argument("--judge-provider", default="openai")
-    cp.add_argument("--judge-model", default="gpt-4o-mini")
+    _add_judge_args(cp)
     cp.add_argument("--samples", "-n", type=int, default=1,
                     help="Samples per side per case; >1 reports noise floor and excess drift")
     _add_output_args(cp)
@@ -207,8 +218,7 @@ examples:
     dp.add_argument("--name-b", default="B", help="Label for side B (default: B)")
     dp.add_argument("--judge", action="store_true",
                     help="Also run the LLM judge (calls a model; off by default)")
-    dp.add_argument("--judge-provider", default=None)
-    dp.add_argument("--judge-model", default=None)
+    _add_judge_args(dp)
     _add_output_args(dp)
     dp.add_argument("--verbose", "-v", action="store_true", help="Show per-case progress")
 

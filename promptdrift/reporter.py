@@ -14,7 +14,8 @@ ORG = "\033[38;5;208m"
 LEVEL_COLOR = {"none": GRN, "minor": CYN, "moderate": YLW, "major": ORG, "regression": RED}
 LEVEL_ICON  = {"none": "●", "minor": "◐", "moderate": "◑", "major": "◕", "regression": "✗"}
 VERDICT_STR = {"improved": f"{GRN}↑ improved{R}", "regressed": f"{RED}↓ regressed{R}",
-               "neutral": f"{DIM}→ neutral{R}", None: f"{DIM}—{R}"}
+               "neutral": f"{DIM}→ neutral{R}", "inconsistent": f"{YLW}? inconsistent{R}",
+               "error": f"{DIM}! judge error{R}", None: f"{DIM}-{R}"}
 
 
 def _bar(v: float, w: int = 22, color: str = GRN) -> str:
@@ -67,6 +68,7 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     _print_structural(report)
     _print_checks(report)
     _print_stability(report)
+    _print_judge(report)
 
     # Overall verdict
     if nr == 0 and dp < 5:
@@ -116,8 +118,8 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
             state = "valid → invalid" if c.json_valid_a else "invalid → valid"
             print(f"    {jc}json    {state}{R}")
 
-        if c.judge_reasoning and c.judge_verdict in ("improved", "regressed"):
-            rc = GRN if c.judge_verdict == "improved" else RED
+        if c.judge_reasoning and c.judge_verdict in ("improved", "regressed", "inconsistent"):
+            rc = {"improved": GRN, "regressed": RED}.get(c.judge_verdict, YLW)
             print(f"    {rc}⚖  {c.judge_reasoning}{R}")
 
         if c.latency_a or c.latency_b:
@@ -180,6 +182,19 @@ def _print_stability(report: DiffReport):
           f"{DIM}(A {pct(st['avg_within_drift_a'])}, B {pct(st['avg_within_drift_b'])}){R}   "
           f"{ec}excess drift {pct(st['avg_excess_drift'])}{R}   "
           f"above noise {st['cases_above_noise']}/{st['cases']}")
+    print()
+
+
+def _print_judge(report: DiffReport):
+    js = report.judge_summary()
+    if js is None:
+        return
+    ic = YLW if js["inconsistent"] else DIM
+    rate = js["inconsistency_rate"]
+    rate_s = f" ({round(rate * 100, 1)}% of two-order runs)" if rate is not None else ""
+    err = f"   {RED}errors {js['errors']}{R}" if js["errors"] else ""
+    print(f"  {BOLD}Judge{R}      judged {js['judged']}   "
+          f"{ic}order-inconsistent {js['inconsistent']}{rate_s}{R}{err}")
     print()
 
 

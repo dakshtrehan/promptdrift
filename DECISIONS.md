@@ -147,3 +147,33 @@ public replacements listed in the README.
 * The CI is shown next to the headline numbers in the terminal report and under
   `summary.ci` in JSON. With very few cases the percentile bootstrap is known to
   be too narrow; the README says so rather than hiding it.
+
+## D7. Provider-agnostic judge, both orders (task 7)
+
+* The judge lives in the public module `promptdrift.judge`: `judge_pair`,
+  `judge_both_orders`, `parse_verdict`, `build_judge_prompt`, `resolve_judge`,
+  `default_judge_provider`. `compare`, `compare_outputs` and the CLI all go
+  through `resolve_judge`, and no module imports another module's private names
+  any more (`offline` used to import from `compare`; the shim aliases in
+  `compare` exist only for external v0.1.1 callers).
+* `judge_provider` accepts a provider name or any object with `complete`, so a
+  custom or mocked provider can be injected. Its default changed from
+  `"openai"` to `None` (auto): OpenAI when `OPENAI_API_KEY` is set (same as
+  v0.1.1 for everyone who had a key), otherwise Anthropic when only
+  `ANTHROPIC_API_KEY` is set, otherwise no judge with a clear message.
+  `judge_model` default changed from `"gpt-4o-mini"` to `None`, meaning the
+  per-provider default in `DEFAULT_JUDGE_MODELS` (OpenAI `gpt-4o-mini`,
+  Anthropic `claude-haiku-4-5-20251001`, Ollama `llama3.2`). Haiku 4.5 was
+  chosen as the Anthropic default because it is cheap and still accepts
+  `temperature`, so judge calls stay as deterministic as the API allows.
+* The judge runs in both orders by default (A then B, B then A). The second
+  verdict is flipped back into A-vs-B terms. Agreement gives that verdict;
+  disagreement gives the new verdict `inconsistent`; a failed or unparseable
+  order gives `error`. Neither new value counts as a regression or an
+  improvement, because the evidence is not reliable; they are counted in
+  `summary.judge` (`inconsistent`, `inconsistency_rate`, `errors`) and shown in
+  the report. This doubles judge calls; `judge_both_orders=False` /
+  `--judge-single-order` restores the v0.1.1 single call, where failures still
+  map to `neutral` for compatibility.
+* `parse_verdict` now rejects verdicts outside improved/regressed/neutral
+  instead of passing through whatever string the model wrote.

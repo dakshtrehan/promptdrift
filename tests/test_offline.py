@@ -68,7 +68,7 @@ def test_compare_outputs_scores_without_models(tmp_path):
 
 
 def test_compare_outputs_list_with_injected_judge(capsys):
-    judge = FakeProvider([verdict_json("regressed")])
+    judge = FakeProvider([verdict_json("regressed"), verdict_json("improved")])
     rep = compare_outputs([dict(r) for r in ROWS], use_judge=True, judge_provider=judge,
                           verbose=True)
     assert rep.cases[1].judge_verdict == "regressed"

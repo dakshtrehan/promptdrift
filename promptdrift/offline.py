@@ -18,6 +18,7 @@ import json
 from pathlib import Path
 
 from .core import DiffReport
+from .judge import resolve_judge
 from .scoring import score_case
 
 __all__ = ["load_outputs", "compare_outputs"]
@@ -88,6 +89,7 @@ def compare_outputs(
     checks=None,
     bootstrap: int = 1000,
     seed: int = 0,
+    judge_both_orders: bool = True,
     verbose: bool = False,
 ) -> DiffReport:
     """Compare stored outputs. No model is called unless ``use_judge=True``.
@@ -102,10 +104,7 @@ def compare_outputs(
         _normalise(r, i) for i, r in enumerate(outputs)
     ]
 
-    judge = None
-    if use_judge:
-        from .compare import resolve_judge
-        judge = resolve_judge(judge_provider, judge_model, verbose=verbose)
+    judge = resolve_judge(judge_provider, judge_model, verbose=verbose) if use_judge else None
 
     report = DiffReport(version_a=str(version_a), version_b=str(version_b),
                         model_a=str(model_a), model_b=str(model_b),
@@ -119,5 +118,6 @@ def compare_outputs(
         if "checks" in rec:
             case["checks"] = rec["checks"]
         report.cases.append(score_case(case, rec["output_a"], rec["output_b"], judge=judge,
-                                       default_checks=checks))
+                                       default_checks=checks,
+                                       judge_both_orders=judge_both_orders))
     return report

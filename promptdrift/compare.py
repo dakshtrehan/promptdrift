@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 from .core import DiffReport
-from .judge import judge_pair
+from .judge import judge_pair, resolve_judge
 from .providers import BaseProvider, get_provider
 from .scoring import score_case
 from .similarity import text_similarity, tfidf_similarity
@@ -104,24 +104,6 @@ def render_prompt(template: str, inp: str) -> str:
         return template.replace("{input}", inp)
 
 
-def resolve_judge(judge_provider=None, judge_model: str | None = None,
-                  verbose: bool = False) -> BaseProvider | None:
-    """Build the judge provider, or return ``None`` if it cannot be built.
-
-    ``judge_provider`` may be a provider name or an object with ``complete``.
-    """
-    if judge_provider is not None and not isinstance(judge_provider, str):
-        return judge_provider
-    name = judge_provider or "openai"
-    kwargs = {"model": judge_model} if judge_model else {}
-    try:
-        return get_provider(name, **kwargs)
-    except Exception:
-        if verbose:
-            print("  ⚠ Judge provider unavailable, skipping judge.\n")
-        return None
-
-
 # ── Embedding provider resolution ─────────────────────────────────────────────
 def _resolve_embedder(cfg: dict) -> BaseProvider | None:
     """
@@ -150,13 +132,14 @@ def compare(
     cases: str | Path | list[dict],
     *,
     use_judge: bool = True,
-    judge_provider: str = "openai",
-    judge_model: str = "gpt-4o-mini",
+    judge_provider: str | BaseProvider | None = None,
+    judge_model: str | None = None,
     verbose: bool = True,
     checks=None,
     samples: int = 1,
     bootstrap: int = 1000,
     seed: int = 0,
+    judge_both_orders: bool = True,
 ) -> DiffReport:
     """
     Compare two prompt versions across a set of test cases.
@@ -167,6 +150,11 @@ def compare(
     ``samples`` > 1 calls each version that many times per case and reports
     within-version drift (noise floor) and excess drift. ``bootstrap`` sets the
     resamples for 95 percent CIs (0 disables); ``seed`` makes them reproducible.
+
+    The judge is any provider name or provider object; with ``None`` it is
+    chosen from the environment (OpenAI if ``OPENAI_API_KEY`` is set, else
+    Anthropic if ``ANTHROPIC_API_KEY`` is set). It runs in both orders and
+    marks disagreements as ``inconsistent`` unless ``judge_both_orders=False``.
     """
     if samples < 1:
         raise ValueError("samples must be at least 1")
@@ -218,7 +206,7 @@ def compare(
             latency_b=round(sum(r.latency for r in resps_b) / samples, 3),
             tokens_a=sum(r.input_tokens + r.output_tokens for r in resps_a),
             tokens_b=sum(r.input_tokens + r.output_tokens for r in resps_b),
-            default_checks=checks,
+            default_checks=checks, judge_both_orders=judge_both_orders,
         ))
 
     return report

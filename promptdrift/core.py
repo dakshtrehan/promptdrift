@@ -39,7 +39,7 @@ class CaseResult:
     similarity: float       # 0.0–1.0
     drift_score: float      # 1 - similarity
     drift_level: str        # none | minor | moderate | major | regression
-    judge_verdict: str | None = None      # improved | regressed | neutral
+    judge_verdict: str | None = None      # improved | regressed | neutral | inconsistent | error
     judge_reasoning: str | None = None
     latency_a: float = 0.0
     latency_b: float = 0.0
@@ -70,6 +70,10 @@ class CaseResult:
     within_drift_b: float | None = None
     noise_floor: float | None = None      # mean of the within-version drifts
     excess_drift: float | None = None     # drift_score - noise_floor
+    # judge run in both orders; verdict_ba is already flipped into A-vs-B terms
+    judge_verdict_ab: str | None = None
+    judge_verdict_ba: str | None = None
+    judge_consistent: bool | None = None
 
 
 @dataclass
@@ -104,6 +108,25 @@ class DiffReport:
     def neutral(self) -> list[CaseResult]:
         imp = {id(c) for c in self.improvements}
         return [c for c in self.cases if not self._is_regression(c) and id(c) not in imp]
+
+    @property
+    def inconsistent(self) -> list[CaseResult]:
+        """Cases where the judge gave different verdicts depending on output order."""
+        return [c for c in self.cases if c.judge_verdict == "inconsistent"]
+
+    def judge_summary(self) -> dict | None:
+        """Judge counts, including order inconsistency, or None if nothing was judged."""
+        judged = [c for c in self.cases if c.judge_verdict is not None]
+        if not judged:
+            return None
+        both = [c for c in judged if c.judge_consistent is not None]
+        return {
+            "judged": len(judged),
+            "both_orders": len(both),
+            "inconsistent": len(self.inconsistent),
+            "inconsistency_rate": round(len(self.inconsistent) / len(both), 4) if both else None,
+            "errors": sum(c.judge_verdict == "error" for c in judged),
+        }
 
     def checks_summary(self) -> dict | None:
         """Pass rates and flip counts over cases that have checks, or None if none do."""
@@ -228,6 +251,7 @@ class DiffReport:
                 "neutral": len(self.neutral),
                 "structural": self.structural_summary(),
                 "checks": self.checks_summary(),
+                "judge": self.judge_summary(),
                 "stability": self.stability_summary(),
                 "ci": self.confidence_intervals(),
             },
