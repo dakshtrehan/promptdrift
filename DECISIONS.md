@@ -62,3 +62,23 @@ public replacements listed in the README.
   `DiffReport` records `mode` (`live` or `offline`).
 * `render_prompt` fills `{input}` with `str.format` as before and falls back to
   plain replacement when a template contains other braces (v0.1.1 crashed).
+
+## D3. Structural drift (task 3)
+
+* New module `promptdrift.structure` with `format_signature`, `signature_string`,
+  `is_valid_json`, `length_ratio` and `structural_diff`. Pure Python, no model calls.
+* The signature records markdown fence, JSON type, bullet/numbered list, markdown
+  headings and non-blank line count. In the comparable string form the line
+  count is bucketed (1, 2 to 4, 5 or more) so one extra sentence is not reported
+  as a format change; the exact count stays available from `format_signature`.
+* JSON validity is checked after removing one surrounding code fence, so
+  "JSON gained a fence" shows up as a format change but not as a validity change.
+  That matches what most production parsers that strip fences would see.
+* Length ratio is `len(B) / len(A)` in characters after trimming. It is `None`
+  when A is empty and B is not (undefined), and 1.0 when both are empty. The
+  summary reports the median rather than the mean, because ratios are skewed and
+  one huge outlier would dominate a mean.
+* Summary adds `format_changes`, `format_change_rate`, `json_validity_changes`,
+  `json_broken` (valid in A, invalid in B) and `median_length_ratio`. Structural
+  changes are reported, not counted as regressions: a format change can be
+  intended, and the user can make it a hard failure with a check (task 4).

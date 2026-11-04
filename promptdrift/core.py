@@ -46,6 +46,14 @@ class CaseResult:
     tokens_a: int = 0
     tokens_b: int = 0
     similarity_method: str = "tfidf"      # tfidf | embedding
+    # structural drift (see promptdrift.structure)
+    signature_a: str | None = None
+    signature_b: str | None = None
+    format_changed: bool | None = None
+    json_valid_a: bool | None = None
+    json_valid_b: bool | None = None
+    json_validity_changed: bool | None = None
+    length_ratio: float | None = None     # len(B) / len(A), None if A is empty
 
 
 @dataclass
@@ -84,6 +92,40 @@ class DiffReport:
             return 0.0
         return len(self.regressions) / len(self.cases)
 
+    @property
+    def format_changes(self) -> list[CaseResult]:
+        return [c for c in self.cases if c.format_changed]
+
+    @property
+    def json_validity_changes(self) -> list[CaseResult]:
+        return [c for c in self.cases if c.json_validity_changed]
+
+    @property
+    def json_broken(self) -> list[CaseResult]:
+        """Cases where A was valid JSON and B is not."""
+        return [c for c in self.cases if c.json_valid_a and c.json_valid_b is False]
+
+    @property
+    def median_length_ratio(self) -> float | None:
+        ratios = sorted(c.length_ratio for c in self.cases if c.length_ratio is not None)
+        if not ratios:
+            return None
+        mid = len(ratios) // 2
+        if len(ratios) % 2:
+            return ratios[mid]
+        return (ratios[mid - 1] + ratios[mid]) / 2
+
+    def structural_summary(self) -> dict:
+        mlr = self.median_length_ratio
+        return {
+            "format_changes": len(self.format_changes),
+            "format_change_rate": round(len(self.format_changes) / len(self.cases), 4)
+            if self.cases else 0.0,
+            "json_validity_changes": len(self.json_validity_changes),
+            "json_broken": len(self.json_broken),
+            "median_length_ratio": round(mlr, 4) if mlr is not None else None,
+        }
+
     def to_dict(self) -> dict:
         return {
             "version_a": self.version_a,
@@ -98,6 +140,7 @@ class DiffReport:
                 "regressions": len(self.regressions),
                 "improvements": len(self.improvements),
                 "neutral": len(self.neutral),
+                "structural": self.structural_summary(),
             },
             "cases": [asdict(c) for c in self.cases],
         }

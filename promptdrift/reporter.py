@@ -54,6 +54,7 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     nn = len(report.neutral)
     print(f"  {GRN}↑ Improved  {ni:3d}{R}   {RED}↓ Regressed {nr:3d}{R}   {DIM}→ Neutral   {nn:3d}{R}")
     print()
+    _print_structural(report)
 
     # Overall verdict
     if nr == 0 and dp < 5:
@@ -88,6 +89,13 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
             print(f"    {DIM}A  › {R}{_trunc(c.output_a, 62)}")
             print(f"    {DIM}B  › {R}{_trunc(c.output_b, 62)}")
 
+        if c.format_changed:
+            print(f"    {YLW}format  {c.signature_a} → {c.signature_b}{R}")
+        if c.json_validity_changed:
+            jc = RED if c.json_valid_a else GRN
+            state = "valid → invalid" if c.json_valid_a else "invalid → valid"
+            print(f"    {jc}json    {state}{R}")
+
         if c.judge_reasoning and c.judge_verdict in ("improved", "regressed"):
             rc = GRN if c.judge_verdict == "improved" else RED
             print(f"    {rc}⚖  {c.judge_reasoning}{R}")
@@ -112,6 +120,20 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
         print()
 
     _footer(W)
+
+
+def _print_structural(report: DiffReport):
+    if not any(c.signature_a is not None for c in report.cases):
+        return
+    st = report.structural_summary()
+    mlr = st["median_length_ratio"]
+    mlr_s = f"{mlr:.2f}x" if mlr is not None else "n/a"
+    fc = YLW if st["format_changes"] else DIM
+    jc = RED if st["json_broken"] else (YLW if st["json_validity_changes"] else DIM)
+    print(f"  {BOLD}Structure{R}  {fc}format changed {st['format_changes']}{R}   "
+          f"{jc}JSON validity changed {st['json_validity_changes']}"
+          f" (broken {st['json_broken']}){R}   {DIM}median length B/A {mlr_s}{R}")
+    print()
 
 
 def _footer(w: int):

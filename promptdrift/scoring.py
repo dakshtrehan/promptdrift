@@ -9,6 +9,7 @@ from __future__ import annotations
 from .core import CaseResult, classify_drift
 from .judge import judge_pair
 from .similarity import text_similarity
+from .structure import structural_diff
 
 __all__ = ["score_case"]
 
@@ -56,4 +57,5 @@ def score_case(
         tokens_a=tokens_a,
         tokens_b=tokens_b,
         similarity_method=method,
+        **structural_diff(output_a, output_b),
     )
