@@ -45,6 +45,7 @@ class CaseResult:
     latency_b: float = 0.0
     tokens_a: int = 0
     tokens_b: int = 0
+    similarity_method: str = "tfidf"      # tfidf | embedding
 
 
 @dataclass
@@ -55,6 +56,7 @@ class DiffReport:
     model_b: str
     total_cases: int
     cases: list[CaseResult] = field(default_factory=list)
+    mode: str = "live"                    # live (models called) | offline (stored outputs)
 
     @property
     def regressions(self) -> list[CaseResult]:
@@ -89,6 +91,7 @@ class DiffReport:
             "model_a": self.model_a,
             "model_b": self.model_b,
             "total_cases": self.total_cases,
+            "mode": self.mode,
             "summary": {
                 "avg_drift": round(self.avg_drift, 4),
                 "regression_rate": round(self.regression_rate, 4),

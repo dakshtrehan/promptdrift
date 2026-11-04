@@ -3,15 +3,15 @@ Main compare engine. Runs prompt versions, embeds outputs, scores drift.
 """
 from __future__ import annotations
 import json
-import math
-import re
-from collections import Counter
 from pathlib import Path
 
 import yaml
 
-from .core import CaseResult, DiffReport, cosine_similarity, classify_drift
+from .core import DiffReport
+from .judge import judge_pair
 from .providers import BaseProvider, get_provider
+from .scoring import score_case
+from .similarity import text_similarity, tfidf_similarity
 
 
 # ── Config / case loaders ─────────────────────────────────────────────────────
@@ -76,75 +76,50 @@ def load_cases(path: str | Path) -> list[dict]:
     return cases
 
 
-# ── TF-IDF fallback (offline, zero-cost similarity) ───────────────────────────
+# ── Backward-compatible aliases (v0.1.1 private names) ───────────────────────
+# Kept so code written against v0.1.1 keeps working. New code should use
+# promptdrift.similarity.tfidf_similarity and promptdrift.judge.judge_pair.
 def _tfidf_similarity(text_a: str, text_b: str) -> float:
-    """Tiny TF-IDF cosine similarity. Used when no embedding provider is available."""
-    tok_a = re.findall(r"\b\w+\b", text_a.lower())
-    tok_b = re.findall(r"\b\w+\b", text_b.lower())
-    vocab = sorted(set(tok_a) | set(tok_b))
-    if not vocab:
-        return 1.0
-    idx = {w: i for i, w in enumerate(vocab)}
-    vec_a = [0.0] * len(vocab)
-    vec_b = [0.0] * len(vocab)
-    ca, cb = Counter(tok_a), Counter(tok_b)
-    ta = sum(ca.values()) or 1
-    tb = sum(cb.values()) or 1
-    for w, i in idx.items():
-        vec_a[i] = ca.get(w, 0) / ta
-        vec_b[i] = cb.get(w, 0) / tb
-    return cosine_similarity(vec_a, vec_b)
+    return tfidf_similarity(text_a, text_b)
 
 
 def _embed_pair(emb_prov: BaseProvider | None, text_a: str, text_b: str) -> float:
-    """Return cosine similarity between two texts. Falls back to TF-IDF on failure."""
-    if emb_prov is not None:
-        try:
-            ea = emb_prov.embed(text_a).vector
-            eb = emb_prov.embed(text_b).vector
-            return cosine_similarity(ea, eb)
-        except Exception:
-            pass
-    return _tfidf_similarity(text_a, text_b)
+    return text_similarity(text_a, text_b, emb_prov)[0]
 
 
-# ── LLM judge ─────────────────────────────────────────────────────────────────
 def _judge(provider: BaseProvider, inp: str, out_a: str, out_b: str,
            expected: str | None = None) -> tuple[str, str]:
+    return judge_pair(provider, inp, out_a, out_b, expected=expected)
+
+
+def render_prompt(template: str, inp: str) -> str:
+    """Fill ``{input}`` in a prompt template.
+
+    Uses ``str.format`` like v0.1.1, and falls back to plain replacement when the
+    template contains other literal braces (for example a JSON example).
     """
-    Ask an LLM to compare A vs B and return (verdict, reasoning).
-    verdict is one of: improved | regressed | neutral
-    """
-    exp_line = f"\nExpected answer: {expected}" if expected else ""
-    prompt = f"""Compare two AI outputs for the same input.{exp_line}
-
-Input: {inp}
-
-Output A (baseline): {out_a}
-
-Output B (new version): {out_b}
-
-Is Output B improved, regressed, or neutral compared to A?
-- improved: clearly more accurate, helpful, or complete
-- regressed: less accurate, introduces errors, or loses important information
-- neutral: equivalent quality, just phrased differently
-
-Respond ONLY with this JSON (no markdown, no extra text):
-{{"verdict": "improved|regressed|neutral", "reasoning": "one sentence"}}"""
-
     try:
-        r = provider.complete(
-            "You evaluate AI output quality. Return only valid JSON.",
-            prompt, max_tokens=150,
-        )
-        text = r.text.strip()
-        start, end = text.find("{"), text.rfind("}") + 1
-        if start >= 0 and end > start:
-            data = json.loads(text[start:end])
-            return data.get("verdict", "neutral"), data.get("reasoning", "")
+        return template.format(input=inp)
+    except (KeyError, IndexError, ValueError):
+        return template.replace("{input}", inp)
+
+
+def resolve_judge(judge_provider=None, judge_model: str | None = None,
+                  verbose: bool = False) -> BaseProvider | None:
+    """Build the judge provider, or return ``None`` if it cannot be built.
+
+    ``judge_provider`` may be a provider name or an object with ``complete``.
+    """
+    if judge_provider is not None and not isinstance(judge_provider, str):
+        return judge_provider
+    name = judge_provider or "openai"
+    kwargs = {"model": judge_model} if judge_model else {}
+    try:
+        return get_provider(name, **kwargs)
     except Exception:
-        pass
-    return "neutral", ""
+        if verbose:
+            print("  ⚠ Judge provider unavailable, skipping judge.\n")
+        return None
 
 
 # ── Embedding provider resolution ─────────────────────────────────────────────
@@ -201,13 +176,7 @@ def compare(
     if emb_prov is None and verbose:
         print("  ⚠ No embedding provider available, using TF-IDF fallback (offline mode).\n")
 
-    judge_prov = None
-    if use_judge:
-        try:
-            judge_prov = get_provider(judge_provider, model=judge_model)
-        except Exception:
-            if verbose:
-                print("  ⚠ Judge provider unavailable, skipping judge.\n")
+    judge_prov = resolve_judge(judge_provider, judge_model, verbose) if use_judge else None
 
     report = DiffReport(
         version_a=str(cfg_a["version"]), version_b=str(cfg_b["version"]),
@@ -223,37 +192,15 @@ def compare(
         params_a = {"temperature": cfg_a["temperature"], "max_tokens": cfg_a["max_tokens"]}
         params_b = {"temperature": cfg_b["temperature"], "max_tokens": cfg_b["max_tokens"]}
 
-        prompt_a = cfg_a["prompt_template"].format(input=inp)
-        prompt_b = cfg_b["prompt_template"].format(input=inp)
+        resp_a = prov_a.complete(cfg_a["system"], render_prompt(cfg_a["prompt_template"], inp),
+                                 **params_a)
+        resp_b = prov_b.complete(cfg_b["system"], render_prompt(cfg_b["prompt_template"], inp),
+                                 **params_b)
 
-        resp_a = prov_a.complete(cfg_a["system"], prompt_a, **params_a)
-        resp_b = prov_b.complete(cfg_b["system"], prompt_b, **params_b)
-
-        sim = _embed_pair(emb_prov, resp_a.text, resp_b.text)
-        drift = round(1.0 - sim, 4)
-        level = classify_drift(sim)
-
-        verdict, reasoning = None, None
-        if judge_prov and level != "none":
-            verdict, reasoning = _judge(
-                judge_prov, inp, resp_a.text, resp_b.text,
-                expected=case.get("expected"),
-            )
-            if verdict == "regressed":
-                level = "regression"
-
-        report.cases.append(CaseResult(
-            case_id=case["id"],
-            input=inp,
-            output_a=resp_a.text,
-            output_b=resp_b.text,
-            similarity=round(sim, 4),
-            drift_score=drift,
-            drift_level=level,
-            judge_verdict=verdict,
-            judge_reasoning=reasoning,
-            latency_a=resp_a.latency,
-            latency_b=resp_b.latency,
+        report.cases.append(score_case(
+            case, resp_a.text, resp_b.text,
+            judge=judge_prov, embedder=emb_prov,
+            latency_a=resp_a.latency, latency_b=resp_b.latency,
             tokens_a=resp_a.input_tokens + resp_a.output_tokens,
             tokens_b=resp_b.input_tokens + resp_b.output_tokens,
         ))

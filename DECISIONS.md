@@ -43,3 +43,22 @@ and keyword construction from v0.1.1 code still works. The private names
 `compare._resolve_embedder` are kept as thin aliases so `pdx.py` keeps running,
 but new code (inside the package and in the research repo) should use the
 public replacements listed in the README.
+
+## D2. Offline mode (task 2)
+
+* New public API `compare_outputs(path_or_records, ...)` and `load_outputs(path)`
+  in `promptdrift.offline`, exported from the package root. New CLI subcommand
+  `promptdrift diff outputs.jsonl`. A separate subcommand was chosen over a flag on
+  `compare` because `compare` requires two config files that make no sense offline.
+* Records need `case_id` (alias `id`), `output_a`, `output_b`; `input` and
+  `expected` are optional. A JSON array is accepted as well as JSONL. A `null`
+  output is read as the empty string (a model can return nothing); any other
+  non-string is an error with the record number.
+* The judge is off by default in offline mode, because the point of the mode is
+  that no model is called. `--judge` opts in.
+* Scoring moved into one shared function, `scoring.score_case`, used by both
+  `compare` and `compare_outputs`, so live and offline results cannot drift apart.
+* Each `CaseResult` now records `similarity_method` (`tfidf` or `embedding`) and
+  `DiffReport` records `mode` (`live` or `offline`).
+* `render_prompt` fills `{input}` with `str.format` as before and falls back to
+  plain replacement when a template contains other braces (v0.1.1 crashed).
