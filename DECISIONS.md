@@ -105,3 +105,29 @@ public replacements listed in the README.
   semantics where `expected` is judge context only.
 * Summary adds `checks`: cases with checks, pass rate A and B, `pass_to_fail` and
   `fail_to_pass` counts (or `null` when no case has checks).
+
+## D5. Multi-sample stability (task 5)
+
+* `compare(..., samples=n)` and `--samples N` call each version `n` times per case.
+  In offline mode, `output_a` / `output_b` may be lists of samples. Sides may
+  have different sample counts.
+* Drift with samples is the mean drift over all A x B pairs. Within-version drift
+  is the mean over unordered pairs inside one side. The noise floor is the mean
+  of the two within-version drifts (or the one available when a side has a
+  single sample). `excess_drift = drift - noise_floor`.
+* `excess_drift` is reported unclipped, so it can be negative. Clipping at zero
+  would bias the average upward; a negative value honestly says "the versions
+  differ less than each one differs from itself".
+* The drift level (none/minor/...) is still classified from the cross-version
+  similarity, so the meaning of `drift_level` does not change with `n`. The
+  summary counts `cases_above_noise` as cases with excess drift above 0.05, the
+  same boundary that separates "none" from "minor".
+* The per-case `output_a` / `output_b`, structural drift and the judge use the
+  first sample of each side, which keeps the v0.1.1 fields as plain strings. All
+  samples are kept in `samples_a` / `samples_b`.
+* Checks run on every sample; a side passes when at least half its samples pass,
+  and `check_pass_rate_a/b` records the exact share.
+* Embeddings are cached per distinct text within a case, so n x n pairs cost at
+  most 2n embedding calls. If an embedder fails for some pairs only, the case's
+  `similarity_method` is `mixed`, so mixed scales are visible instead of hidden.
+* Live mode reports mean latency and total tokens across samples.

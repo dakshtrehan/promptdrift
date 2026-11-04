@@ -28,6 +28,7 @@ def cmd_compare(args):
             judge_model=args.judge_model,
             verbose=not args.quiet,
             checks=_load_checks(args.checks),
+            samples=args.samples,
         )
     except FileNotFoundError as e:
         print(f"\n  ✗ File not found: {e}", file=sys.stderr)
@@ -186,6 +187,8 @@ examples:
     cp.add_argument("--no-judge", action="store_true", help="Skip LLM-as-judge (embedding only, faster)")
     cp.add_argument("--judge-provider", default="openai")
     cp.add_argument("--judge-model", default="gpt-4o-mini")
+    cp.add_argument("--samples", "-n", type=int, default=1,
+                    help="Samples per side per case; >1 reports noise floor and excess drift")
     _add_output_args(cp)
     cp.add_argument("--quiet", "-q", action="store_true", help="Suppress progress output")
     cp.add_argument("--verbose", "-v", action="store_true", help="Verbose error traces")

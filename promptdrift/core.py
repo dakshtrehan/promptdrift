@@ -45,7 +45,7 @@ class CaseResult:
     latency_b: float = 0.0
     tokens_a: int = 0
     tokens_b: int = 0
-    similarity_method: str = "tfidf"      # tfidf | embedding
+    similarity_method: str = "tfidf"      # tfidf | embedding | mixed (embedding fell back)
     # structural drift (see promptdrift.structure)
     signature_a: str | None = None
     signature_b: str | None = None
@@ -60,6 +60,16 @@ class CaseResult:
     check_flip: str | None = None         # pass_to_fail | fail_to_pass | None
     check_results_a: list | None = None
     check_results_b: list | None = None
+    check_pass_rate_a: float | None = None  # share of samples passing (1.0 or 0.0 if n=1)
+    check_pass_rate_b: float | None = None
+    # multi-sample stability; defaults describe a single-sample run
+    n_samples: int = 1
+    samples_a: list | None = None
+    samples_b: list | None = None
+    within_drift_a: float | None = None   # mean pairwise drift among A samples
+    within_drift_b: float | None = None
+    noise_floor: float | None = None      # mean of the within-version drifts
+    excess_drift: float | None = None     # drift_score - noise_floor
 
 
 @dataclass
@@ -153,6 +163,31 @@ class DiffReport:
             "median_length_ratio": round(mlr, 4) if mlr is not None else None,
         }
 
+    def stability_summary(self, threshold: float = 0.05) -> dict | None:
+        """Noise floor and excess drift over multi-sample cases, or None if there are none.
+
+        ``cases_above_noise`` counts cases whose excess drift exceeds ``threshold``
+        (the same 0.05 boundary that separates "none" from "minor" drift).
+        """
+        multi = [c for c in self.cases if c.n_samples > 1 and c.excess_drift is not None]
+        if not multi:
+            return None
+        n = len(multi)
+
+        def avg(vals):
+            vals = [v for v in vals if v is not None]
+            return round(sum(vals) / len(vals), 4) if vals else None
+
+        return {
+            "cases": n,
+            "samples_per_side": max(c.n_samples for c in multi),
+            "avg_within_drift_a": avg(c.within_drift_a for c in multi),
+            "avg_within_drift_b": avg(c.within_drift_b for c in multi),
+            "avg_noise_floor": avg(c.noise_floor for c in multi),
+            "avg_excess_drift": avg(c.excess_drift for c in multi),
+            "cases_above_noise": sum(c.excess_drift > threshold for c in multi),
+        }
+
     def to_dict(self) -> dict:
         return {
             "version_a": self.version_a,
@@ -169,6 +204,7 @@ class DiffReport:
                 "neutral": len(self.neutral),
                 "structural": self.structural_summary(),
                 "checks": self.checks_summary(),
+                "stability": self.stability_summary(),
             },
             "cases": [asdict(c) for c in self.cases],
         }

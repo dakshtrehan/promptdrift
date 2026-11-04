@@ -154,6 +154,7 @@ def compare(
     judge_model: str = "gpt-4o-mini",
     verbose: bool = True,
     checks=None,
+    samples: int = 1,
 ) -> DiffReport:
     """
     Compare two prompt versions across a set of test cases.
@@ -161,7 +162,11 @@ def compare(
     Returns a DiffReport with per-case semantic drift, judge verdicts,
     latency deltas, structural drift, check flips, and an overall regression
     summary. ``checks`` is a default checks spec for cases without their own.
+    ``samples`` > 1 calls each version that many times per case and reports
+    within-version drift (noise floor) and excess drift.
     """
+    if samples < 1:
+        raise ValueError("samples must be at least 1")
     cfg_a = load_config(config_a) if not isinstance(config_a, dict) else config_a
     cfg_b = load_config(config_b) if not isinstance(config_b, dict) else config_b
     test_cases = load_cases(cases) if not isinstance(cases, list) else cases
@@ -170,7 +175,8 @@ def compare(
         print(f"\n⚡ promptdrift")
         print(f"   A : {cfg_a['version']} ({cfg_a['provider']} / {cfg_a['model']})")
         print(f"   B : {cfg_b['version']} ({cfg_b['provider']} / {cfg_b['model']})")
-        print(f"   Cases : {len(test_cases)}   Judge : {'on' if use_judge else 'off'}\n")
+        print(f"   Cases : {len(test_cases)}   Judge : {'on' if use_judge else 'off'}"
+              f"   Samples : {samples}\n")
 
     prov_a = get_provider(cfg_a["provider"], model=cfg_a["model"])
     prov_b = get_provider(cfg_b["provider"], model=cfg_b["model"])
@@ -194,17 +200,20 @@ def compare(
         params_a = {"temperature": cfg_a["temperature"], "max_tokens": cfg_a["max_tokens"]}
         params_b = {"temperature": cfg_b["temperature"], "max_tokens": cfg_b["max_tokens"]}
 
-        resp_a = prov_a.complete(cfg_a["system"], render_prompt(cfg_a["prompt_template"], inp),
-                                 **params_a)
-        resp_b = prov_b.complete(cfg_b["system"], render_prompt(cfg_b["prompt_template"], inp),
-                                 **params_b)
+        prompt_a = render_prompt(cfg_a["prompt_template"], inp)
+        prompt_b = render_prompt(cfg_b["prompt_template"], inp)
+        resps_a = [prov_a.complete(cfg_a["system"], prompt_a, **params_a) for _ in range(samples)]
+        resps_b = [prov_b.complete(cfg_b["system"], prompt_b, **params_b) for _ in range(samples)]
 
+        texts_a = [r.text for r in resps_a]
+        texts_b = [r.text for r in resps_b]
         report.cases.append(score_case(
-            case, resp_a.text, resp_b.text,
+            case, texts_a if samples > 1 else texts_a[0], texts_b if samples > 1 else texts_b[0],
             judge=judge_prov, embedder=emb_prov,
-            latency_a=resp_a.latency, latency_b=resp_b.latency,
-            tokens_a=resp_a.input_tokens + resp_a.output_tokens,
-            tokens_b=resp_b.input_tokens + resp_b.output_tokens,
+            latency_a=round(sum(r.latency for r in resps_a) / samples, 3),
+            latency_b=round(sum(r.latency for r in resps_b) / samples, 3),
+            tokens_a=sum(r.input_tokens + r.output_tokens for r in resps_a),
+            tokens_b=sum(r.input_tokens + r.output_tokens for r in resps_b),
             default_checks=checks,
         ))
 

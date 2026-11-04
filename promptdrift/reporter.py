@@ -56,6 +56,7 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     print()
     _print_structural(report)
     _print_checks(report)
+    _print_stability(report)
 
     # Overall verdict
     if nr == 0 and dp < 5:
@@ -90,6 +91,9 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
             print(f"    {DIM}A  › {R}{_trunc(c.output_a, 62)}")
             print(f"    {DIM}B  › {R}{_trunc(c.output_b, 62)}")
 
+        if c.n_samples > 1 and c.excess_drift is not None:
+            print(f"    {DIM}stability n={c.n_samples}  noise={c.noise_floor}  "
+                  f"excess={c.excess_drift:+.4f}{R}")
         if c.format_changed:
             print(f"    {YLW}format  {c.signature_a} → {c.signature_b}{R}")
         if c.check_flip:
@@ -151,6 +155,21 @@ def _print_checks(report: DiffReport):
     print(f"  {BOLD}Checks{R}     pass A {pa}%  B {pb}%  ({cs['cases_with_checks']} cases)   "
           f"{fc}pass→fail {cs['pass_to_fail']}{R}   "
           f"{GRN if cs['fail_to_pass'] else DIM}fail→pass {cs['fail_to_pass']}{R}")
+    print()
+
+
+def _print_stability(report: DiffReport):
+    st = report.stability_summary()
+    if st is None:
+        return
+    def pct(v):
+        return "n/a" if v is None else f"{round(v * 100, 1)}%"
+    ec = YLW if (st["avg_excess_drift"] or 0) > 0.05 else DIM
+    print(f"  {BOLD}Stability{R}  n={st['samples_per_side']}/side   "
+          f"noise floor {pct(st['avg_noise_floor'])} "
+          f"{DIM}(A {pct(st['avg_within_drift_a'])}, B {pct(st['avg_within_drift_b'])}){R}   "
+          f"{ec}excess drift {pct(st['avg_excess_drift'])}{R}   "
+          f"above noise {st['cases_above_noise']}/{st['cases']}")
     print()
 
 

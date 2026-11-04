@@ -5,6 +5,9 @@ Input is JSONL (or a JSON array) with one record per case::
 
     {"case_id": "greet", "output_a": "Hello!", "output_b": "Hi there."}
 
+For multi-sample stability, ``output_a`` and ``output_b`` may be lists of
+samples: ``{"case_id": "greet", "output_a": ["Hi", "Hello"], "output_b": [...]}``.
+
 Optional fields per record: ``input`` and ``expected`` (context for the
 report and the optional judge) and ``checks`` (deterministic checks, see
 ``promptdrift.checks``).
@@ -34,8 +37,14 @@ def _normalise(rec: dict, i: int) -> dict:
             raise ValueError(f"Record {i + 1} ({rec['case_id']}): missing '{side}'.")
         if rec[side] is None:
             rec[side] = ""
-        if not isinstance(rec[side], str):
-            raise ValueError(f"Record {i + 1} ({rec['case_id']}): '{side}' must be a string.")
+        val = rec[side]
+        ok = isinstance(val, str) or (
+            isinstance(val, list) and val and all(isinstance(v, (str, type(None))) for v in val))
+        if not ok:
+            raise ValueError(f"Record {i + 1} ({rec['case_id']}): '{side}' must be a string "
+                             "or a non-empty list of strings (samples).")
+        if isinstance(val, list):
+            rec[side] = [v or "" for v in val]
     rec["case_id"] = str(rec["case_id"])
     return rec
 
