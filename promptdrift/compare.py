@@ -2,6 +2,7 @@
 Main compare engine. Runs prompt versions, embeds outputs, scores drift.
 """
 from __future__ import annotations
+
 import json
 from pathlib import Path
 
@@ -179,7 +180,7 @@ def compare(
         raise ValueError("similarity must be 'tfidf' or 'embedding'")
 
     if verbose:
-        print(f"\n⚡ promptdrift")
+        print("\n⚡ promptdrift")
         print(f"   A : {cfg_a['version']} ({cfg_a['provider']} / {cfg_a['model']})")
         print(f"   B : {cfg_b['version']} ({cfg_b['provider']} / {cfg_b['model']})")
         print(f"   Cases : {len(test_cases)}   Judge : {'on' if use_judge else 'off'}"

@@ -227,3 +227,35 @@ public replacements listed in the README.
   TF-IDF scale. It is listed under "Changed" in the CHANGELOG.
 * Added `--version` and a single-source `promptdrift/version.py`; the reporter no
   longer hardcodes the version and labels offline reports.
+
+## D10. Tests, CI, docs and version (task 10)
+
+* Coverage went from 51 to 99 percent (146 tests). Every provider is mocked;
+  the Anthropic wire test uses the real SDK with a mock HTTP transport. SDK 2.x
+  uses the `httpx2` package and older SDKs use `httpx`, so the test picks
+  whichever exists. On Python 3.9 pip resolves an older `anthropic` (0.x) whose
+  default header is already `2023-06-01`, so that test asserts "left at the
+  SDK's default" rather than "not 2023-06-01".
+* Verified locally on Python 3.9, 3.10, 3.11, 3.12 and 3.13 (uv-managed venvs),
+  and in a core-only venv with no provider SDK installed.
+* CI: test matrix for 3.9 to 3.13 with lint that can fail and
+  `--cov-fail-under=90`; a core-only job proving the zero-dependency path; a
+  package job that builds, runs `twine check --strict` and runs the installed
+  wheel. API key env vars are blanked in CI so nothing can call out.
+* Ruff rules are pinned (`E`, `F`, `W`, `I`, `B`) because newer ruff releases
+  widened the default set; tests are exempt from line length only.
+* JSON detection for structural drift counts only objects and arrays. Found while
+  writing the README example: a bare `30` parsed as JSON, so rewording a numeric
+  answer was reported as "JSON broken". Scalars are now plain text.
+* The terminal verdict no longer says SAFE TO SHIP when formats changed or the
+  judge was order-inconsistent, even if drift is under 5 percent.
+* README: removed the PyPI badge and `pip install promptdrift` (the package is
+  not published), documented install from GitHub, documented every new feature
+  with its limits, and replaced the sample output with real output from
+  `examples/outputs.jsonl`. Removed the comparison table against PromptFoo,
+  LangSmith and Ragas because its claims were not verified and some are likely
+  wrong. Every code snippet in the README was executed.
+* Version is single-sourced in `promptdrift/version.py` and read by setuptools
+  (`dynamic = ["version"]`). Build backend raised to setuptools>=77 to use the
+  SPDX `license = "MIT"` field; the deprecated license classifier was removed
+  because setuptools rejects having both.

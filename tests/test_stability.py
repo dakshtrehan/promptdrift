@@ -1,15 +1,15 @@
-import json
-
-import pytest
 
 import importlib
 
-cmp = importlib.import_module("promptdrift.compare")
+import pytest
+
 from promptdrift import compare, compare_outputs
 from promptdrift.reporter import print_report
 from promptdrift.scoring import pairwise_drift, score_case
 
 from .conftest import FakeProvider
+
+cmp = importlib.import_module("promptdrift.compare")
 
 
 def test_pairwise_drift():

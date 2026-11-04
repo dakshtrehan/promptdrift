@@ -4,9 +4,14 @@ import types
 
 import pytest
 
-from promptdrift.providers import (ANTHROPIC_LEGACY_API_VERSION, AnthropicProvider,
-                                   OllamaProvider, OpenAIProvider,
-                                   anthropic_supports_temperature, claude_version, get_provider)
+from promptdrift.providers import (
+    ANTHROPIC_LEGACY_API_VERSION,
+    AnthropicProvider,
+    OpenAIProvider,
+    anthropic_supports_temperature,
+    claude_version,
+    get_provider,
+)
 
 
 @pytest.mark.parametrize("mid,ver,temp", [
@@ -127,7 +132,8 @@ def test_anthropic_real_sdk_wire_format():
     assert new.complete("s", "2+2?", temperature=0.0).text == "4"
     body = json.loads(seen[-1].content)
     assert "temperature" not in body
-    assert seen[-1].headers["anthropic-version"] != "2023-06-01"  # SDK default
+    # left at the SDK's own default (2026-10-21 on 2.x, 2023-06-01 on older SDKs)
+    assert seen[-1].headers["anthropic-version"] == client.default_headers["anthropic-version"]
 
 
 def test_anthropic_import_error(monkeypatch):

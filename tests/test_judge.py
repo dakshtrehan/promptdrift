@@ -3,8 +3,15 @@ import importlib
 import pytest
 
 from promptdrift import compare_outputs
-from promptdrift.judge import (DEFAULT_JUDGE_MODELS, build_judge_prompt, default_judge_provider,
-                               judge_both_orders, judge_pair, parse_verdict, resolve_judge)
+from promptdrift.judge import (
+    DEFAULT_JUDGE_MODELS,
+    build_judge_prompt,
+    default_judge_provider,
+    judge_both_orders,
+    judge_pair,
+    parse_verdict,
+    resolve_judge,
+)
 from promptdrift.reporter import print_report
 
 from .conftest import FakeProvider, verdict_json

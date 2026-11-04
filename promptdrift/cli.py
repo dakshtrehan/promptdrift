@@ -9,9 +9,10 @@ Usage:
   promptdrift init --dir ./prompts
 """
 from __future__ import annotations
+
 import argparse
-import sys
 import json
+import sys
 from pathlib import Path
 
 
@@ -43,7 +44,8 @@ def cmd_compare(args):
     except Exception as e:
         print(f"\n  ✗ Error: {e}", file=sys.stderr)
         if args.verbose:
-            import traceback; traceback.print_exc()
+            import traceback
+            traceback.print_exc()
         sys.exit(1)
 
     _emit(report, args)
@@ -120,9 +122,13 @@ def cmd_init(args):
     }
     cases = [
         {"id": "math", "input": "What is 12 × 8?", "expected": "96"},
-        {"id": "summarise", "input": "Summarise in one sentence: The quick brown fox jumps over the lazy dog."},
+        {"id": "summarise",
+         "input": "Summarise in one sentence: The quick brown fox jumps over the lazy dog."},
         {"id": "code", "input": "Write a Python one-liner to reverse a string."},
-        {"id": "reasoning", "input": "If 5 machines make 5 widgets in 5 minutes, how long does it take 100 machines to make 100 widgets?", "expected": "5 minutes"},
+        {"id": "reasoning",
+         "input": "If 5 machines make 5 widgets in 5 minutes, how long does it take "
+                  "100 machines to make 100 widgets?",
+         "expected": "5 minutes"},
     ]
 
     with open(out / "v1.yaml", "w") as f:
@@ -133,11 +139,11 @@ def cmd_init(args):
         json.dump(cases, f, indent=2)
 
     print(f"\n  ✓ Created in {out}/")
-    print(f"    v1.yaml      baseline prompt config")
-    print(f"    v2.yaml      new prompt config")
-    print(f"    golden.json  test cases\n")
-    print(f"  Next:")
-    print(f"    export OPENAI_API_KEY=sk-...")
+    print("    v1.yaml      baseline prompt config")
+    print("    v2.yaml      new prompt config")
+    print("    golden.json  test cases\n")
+    print("  Next:")
+    print("    export OPENAI_API_KEY=sk-...")
     print(f"    promptdrift compare {out}/v1.yaml {out}/v2.yaml --cases {out}/golden.json\n")
 
 

@@ -1,15 +1,15 @@
 """
-Terminal reporter — the output that gets shared on Twitter.
+Terminal and JSON reporting.
 """
 from __future__ import annotations
-import json
-from .core import DiffReport, CaseResult
+
+from .core import DiffReport
 from .version import __version__
 
 # ANSI
-R = "\033[0m"; BOLD = "\033[1m"; DIM = "\033[2m"
-RED = "\033[91m"; GRN = "\033[92m"; YLW = "\033[93m"
-BLU = "\033[94m"; MGT = "\033[95m"; CYN = "\033[96m"
+R, BOLD, DIM = "\033[0m", "\033[1m", "\033[2m"
+RED, GRN, YLW = "\033[91m", "\033[92m", "\033[93m"
+BLU, MGT, CYN = "\033[94m", "\033[95m", "\033[96m"
 ORG = "\033[38;5;208m"
 
 LEVEL_COLOR = {"none": GRN, "minor": CYN, "moderate": YLW, "major": ORG, "regression": RED}
@@ -66,7 +66,8 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     ni = len(report.improvements)
     nr = len(report.regressions)
     nn = len(report.neutral)
-    print(f"  {GRN}↑ Improved  {ni:3d}{R}   {RED}↓ Regressed {nr:3d}{R}   {DIM}→ Neutral   {nn:3d}{R}")
+    print(f"  {GRN}↑ Improved  {ni:3d}{R}   {RED}↓ Regressed {nr:3d}{R}   "
+          f"{DIM}→ Neutral   {nn:3d}{R}")
     print()
     _print_structural(report)
     _print_checks(report)
@@ -74,12 +75,18 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     _print_judge(report)
 
     # Overall verdict
-    if nr == 0 and dp < 5:
-        verdict = f"{GRN}{BOLD}  ✓  SAFE TO SHIP — no regressions, minimal drift{R}"
+    flags = []
+    if report.format_changes:
+        flags.append(f"{len(report.format_changes)} format change(s)")
+    if report.inconsistent:
+        flags.append(f"{len(report.inconsistent)} order-inconsistent judge verdict(s)")
+    if nr == 0 and dp < 5 and not flags:
+        verdict = f"{GRN}{BOLD}  ✓  SAFE TO SHIP: no regressions, minimal drift{R}"
     elif nr == 0:
-        verdict = f"{YLW}{BOLD}  ⚡  REVIEW — semantic drift detected, no regressions{R}"
+        why = ", ".join((["semantic drift"] if dp >= 5 else []) + flags)
+        verdict = f"{YLW}{BOLD}  ⚡  REVIEW: {why}, no regressions{R}"
     else:
-        verdict = f"{RED}{BOLD}  ✗  DO NOT SHIP — {nr} regression(s) detected{R}"
+        verdict = f"{RED}{BOLD}  ✗  DO NOT SHIP: {nr} regression(s) detected{R}"
 
     print(f"  {'─' * (W-2)}")
     print(verdict)
@@ -128,7 +135,7 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
         if c.latency_a or c.latency_b:
             delta = round(c.latency_b - c.latency_a, 3)
             lc = RED if delta > 0.5 else GRN if delta < -0.2 else DIM
-            print(f"    {DIM}lat A={c.latency_a}s  B={c.latency_b}s  Δ={lc}{delta:+.3f}s{R}{DIM}{R}")
+            print(f"    {DIM}lat A={c.latency_a}s  B={c.latency_b}s  Δ={lc}{delta:+.3f}s{R}")
         print()
 
     # Regressions detail

@@ -16,8 +16,7 @@ __all__ = ["strip_fence", "format_signature", "signature_string", "is_valid_json
 _FENCE = re.compile(r"^```[\w+-]*[ \t]*\n(.*?)\n?```$", re.DOTALL)
 _LIST_ITEM = re.compile(r"^\s*([-*+•]|\d+[.)])\s+")
 _HEADING = re.compile(r"^\s{0,3}#{1,6}\s+\S", re.MULTILINE)
-_JSON_TYPES = {dict: "object", list: "array", str: "string", bool: "boolean",
-               int: "number", float: "number", type(None): "null"}
+_JSON_TYPES = {dict: "object", list: "array"}
 
 
 def strip_fence(text: str) -> tuple[str, bool]:
@@ -30,17 +29,22 @@ def strip_fence(text: str) -> tuple[str, bool]:
 
 
 def _json_type(body: str) -> str | None:
-    if not body:
+    """``object`` or ``array`` if ``body`` is a JSON container, else ``None``.
+
+    Bare scalars (``30``, ``true``, ``"hi"``) are treated as plain text: a model
+    answering ``30`` is almost never emitting JSON on purpose.
+    """
+    if not body or body[0] not in "[{":
         return None
     try:
         obj = json.loads(body)
     except ValueError:
         return None
-    return _JSON_TYPES.get(type(obj), "other")
+    return _JSON_TYPES.get(type(obj))
 
 
 def is_valid_json(text: str) -> bool:
-    """True if ``text`` parses as JSON, allowing one surrounding markdown fence."""
+    """True if ``text`` is a JSON object or array, allowing one surrounding code fence."""
     return _json_type(strip_fence(text)[0]) is not None
 
 
@@ -48,9 +52,9 @@ def format_signature(text: str) -> dict:
     """Describe the surface format of an output.
 
     Keys: ``fence`` (wrapped in a markdown code fence), ``json_type`` (``object``,
-    ``array``, ``string``, ``number``, ``boolean``, ``null`` or ``None`` when not
-    JSON), ``list`` (every non-blank line is a bullet or numbered item),
-    ``headings`` (has a markdown heading) and ``line_count`` (non-blank lines).
+    ``array`` or ``None`` when the output is not a JSON container), ``list``
+    (every non-blank line is a bullet or numbered item), ``headings`` (has a
+    markdown heading) and ``line_count`` (non-blank lines).
     """
     body, fenced = strip_fence(text)
     lines = [ln for ln in body.splitlines() if ln.strip()]

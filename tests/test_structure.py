@@ -2,8 +2,13 @@ import pytest
 
 from promptdrift import compare_outputs
 from promptdrift.reporter import print_report
-from promptdrift.structure import (format_signature, is_valid_json, length_ratio,
-                                   signature_string, structural_diff)
+from promptdrift.structure import (
+    format_signature,
+    is_valid_json,
+    length_ratio,
+    signature_string,
+    structural_diff,
+)
 
 
 def test_signature_json_fenced():
@@ -17,8 +22,9 @@ def test_signature_json_fenced():
     ("", "empty"),
     ("   \n  ", "empty"),
     ("[1, 2]", "json:array+lines:1"),
-    ("null", "json:null+lines:1"),
-    ('"hi"', "json:string+lines:1"),
+    ("null", "lines:1"),
+    ('"hi"', "lines:1"),
+    ("30", "lines:1"),
     ("- a\n- b\n- c", "list+lines:2-4"),
     ("1. a\n2) b", "list+lines:2-4"),
     ("# Title\n\nbody text", "headings+lines:2-4"),
@@ -35,6 +41,7 @@ def test_is_valid_json():
     assert is_valid_json('```json\n[1]\n```')
     assert not is_valid_json('{"x": ')
     assert not is_valid_json("")
+    assert not is_valid_json("30") and not is_valid_json("true")
 
 
 def test_length_ratio():

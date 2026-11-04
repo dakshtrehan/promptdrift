@@ -2,6 +2,7 @@
 Provider abstraction: OpenAI, Anthropic, Ollama.
 """
 from __future__ import annotations
+
 import os
 import re
 import time
@@ -41,7 +42,7 @@ class OpenAIProvider(BaseProvider):
         try:
             from openai import OpenAI
         except ImportError:
-            raise ImportError("pip install openai")
+            raise ImportError("pip install openai") from None
         self.client = OpenAI(api_key=api_key or os.environ.get("OPENAI_API_KEY"))
         self.model = model
         self.embed_model = embed_model
@@ -115,7 +116,7 @@ class AnthropicProvider(BaseProvider):
             try:
                 import anthropic
             except ImportError:
-                raise ImportError("pip install anthropic")
+                raise ImportError("pip install anthropic") from None
             client = anthropic.Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
         self.client = client
         self.model = model

@@ -10,7 +10,8 @@ from itertools import combinations
 
 from .checks import check_flip, normalize_checks, run_checks
 from .core import CaseResult, classify_drift
-from .judge import judge_both_orders as judge_two_orders, judge_pair
+from .judge import judge_both_orders as judge_two_orders
+from .judge import judge_pair
 from .similarity import text_similarity
 from .structure import structural_diff
 
