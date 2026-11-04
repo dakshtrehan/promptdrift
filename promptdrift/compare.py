@@ -20,7 +20,9 @@ def load_config(path: str | Path) -> dict:
     Load a prompt config (YAML or JSON).
 
     Required fields: version, model, provider, prompt_template
-    Optional: system, temperature, max_tokens, embedding_model
+    Optional: system, temperature, max_tokens, embedding_model, provider_options
+    (extra keyword arguments for the provider, for example
+    ``{"temperature_supported": false}`` or ``{"base_url": "..."}`` for Ollama)
 
     Example:
         version: v2
@@ -169,8 +171,10 @@ def compare(
         print(f"   Cases : {len(test_cases)}   Judge : {'on' if use_judge else 'off'}"
               f"   Samples : {samples}\n")
 
-    prov_a = get_provider(cfg_a["provider"], model=cfg_a["model"])
-    prov_b = get_provider(cfg_b["provider"], model=cfg_b["model"])
+    prov_a = get_provider(cfg_a["provider"], model=cfg_a["model"],
+                          **(cfg_a.get("provider_options") or {}))
+    prov_b = get_provider(cfg_b["provider"], model=cfg_b["model"],
+                          **(cfg_b.get("provider_options") or {}))
     emb_prov = _resolve_embedder(cfg_a)
     if emb_prov is None and verbose:
         print("  ⚠ No embedding provider available, using TF-IDF fallback (offline mode).\n")

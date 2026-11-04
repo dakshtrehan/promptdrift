@@ -177,3 +177,33 @@ public replacements listed in the README.
   map to `neutral` for compatibility.
 * `parse_verdict` now rejects verdicts outside improved/regressed/neutral
   instead of passing through whatever string the model wrote.
+
+## D8. Current Anthropic API behaviour (task 8)
+
+* Verified against the installed SDK, not assumed: `anthropic` 2.4.0 has no typed
+  `temperature`, `top_p` or `top_k` on `messages.create`, and its default
+  `anthropic-version` header is `2026-10-21`, which rejects sampling parameters.
+  v0.1.1 passed `temperature` as a keyword and so failed on every call.
+* `claude_version(model)` parses Claude ids (new style `claude-opus-4-7`, dated
+  `claude-haiku-4-5-20251001`, `claude-sonnet-4-20250514`, old style
+  `claude-3-5-sonnet-...`, and Bedrock/Vertex forms such as `anthropic.` prefixes
+  or `@date`). `anthropic_supports_temperature` is true below 4.7.
+* When the model supports sampling and the caller passed a value, the provider
+  sends it in `extra_body` and sets `anthropic-version: 2023-06-01`. Otherwise
+  sampling parameters are dropped silently, because Claude 4.7+ only accepts
+  default sampling and the config default `temperature: 0.0` must not break
+  those models. Unrecognised model ids are treated as not supporting sampling,
+  since omitting it is accepted everywhere. `provider_options:
+  {temperature_supported: true|false}` in a config overrides the detection, for
+  proxies or ids the parser does not know.
+* Response text is the concatenation of every `text` block, so `thinking` and
+  `redacted_thinking` blocks are skipped wherever they appear. Missing `usage`
+  reads as zero tokens.
+* An empty system prompt is omitted rather than sent as `""`.
+* A test drives the real installed SDK through a mock transport (SDK 2.x uses
+  `httpx2`, 1.x uses `httpx`; the test picks whichever exists) and asserts the
+  exact header and JSON body on the wire. No request leaves the machine.
+* Related fix: the Ollama provider ignored `temperature` and `max_tokens`. It now
+  sends them as `options.temperature` and `options.num_predict`.
+* New config field `provider_options` forwards extra keyword arguments to the
+  provider constructor.
