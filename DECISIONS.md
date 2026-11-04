@@ -131,3 +131,19 @@ public replacements listed in the README.
   most 2n embedding calls. If an embedder fails for some pairs only, the case's
   `similarity_method` is `mixed`, so mixed scales are visible instead of hidden.
 * Live mode reports mean latency and total tokens across samples.
+
+## D6. Bootstrap confidence intervals (task 6)
+
+* New module `promptdrift.stats` (pure Python, `random.Random(seed)`, no numpy).
+  Percentile bootstrap of the mean, resampling cases with replacement.
+* `DiffReport.confidence_intervals()` gives 95 percent CIs for `avg_drift` and
+  `regression_rate`, plus `avg_excess_drift` when samples were used. All metrics
+  share the same resampled case indices (paired bootstrap), so they are
+  consistent with each other.
+* Defaults: 1000 resamples, seed 0. Deterministic by default so the same input
+  always gives the same report (important for CI diffs). Configurable with
+  `bootstrap=` / `seed=` and `--bootstrap N` / `--seed`; 0 disables. The CI is
+  computed on demand from the cases, so it always reflects the current cases.
+* The CI is shown next to the headline numbers in the terminal report and under
+  `summary.ci` in JSON. With very few cases the percentile bootstrap is known to
+  be too narrow; the README says so rather than hiding it.

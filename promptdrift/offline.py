@@ -86,13 +86,17 @@ def compare_outputs(
     judge_provider=None,
     judge_model: str | None = None,
     checks=None,
+    bootstrap: int = 1000,
+    seed: int = 0,
     verbose: bool = False,
 ) -> DiffReport:
     """Compare stored outputs. No model is called unless ``use_judge=True``.
 
     ``outputs`` is a path to JSONL/JSON or a list of record dicts (see
     ``load_outputs``). ``checks`` is a default checks spec for records that do
-    not carry their own. Returns the same ``DiffReport`` as ``compare``.
+    not carry their own. ``bootstrap`` is the number of resamples for the 95
+    percent CIs (0 disables) and ``seed`` makes them reproducible. Returns the
+    same ``DiffReport`` as ``compare``.
     """
     records = load_outputs(outputs) if not isinstance(outputs, list) else [
         _normalise(r, i) for i, r in enumerate(outputs)
@@ -105,7 +109,8 @@ def compare_outputs(
 
     report = DiffReport(version_a=str(version_a), version_b=str(version_b),
                         model_a=str(model_a), model_b=str(model_b),
-                        total_cases=len(records), mode="offline")
+                        total_cases=len(records), mode="offline",
+                        n_bootstrap=bootstrap, bootstrap_seed=seed)
     for i, rec in enumerate(records):
         if verbose:
             print(f"  [{i + 1}/{len(records)}] {rec['case_id']}")

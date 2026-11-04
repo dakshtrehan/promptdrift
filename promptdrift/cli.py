@@ -29,6 +29,8 @@ def cmd_compare(args):
             verbose=not args.quiet,
             checks=_load_checks(args.checks),
             samples=args.samples,
+            bootstrap=args.bootstrap,
+            seed=args.seed,
         )
     except FileNotFoundError as e:
         print(f"\n  ✗ File not found: {e}", file=sys.stderr)
@@ -75,6 +77,8 @@ def cmd_diff(args):
             judge_provider=args.judge_provider,
             judge_model=args.judge_model,
             checks=_load_checks(args.checks),
+            bootstrap=args.bootstrap,
+            seed=args.seed,
             verbose=args.verbose,
         )
     except FileNotFoundError as e:
@@ -151,6 +155,9 @@ def _load_checks(path):
 
 
 def _add_output_args(p):
+    p.add_argument("--bootstrap", type=int, default=1000, metavar="N",
+                   help="Bootstrap resamples for 95%% CIs (default 1000, 0 disables)")
+    p.add_argument("--seed", type=int, default=0, help="Random seed for the bootstrap")
     p.add_argument("--checks", metavar="FILE",
                    help="Default deterministic checks (JSON/YAML) for cases without their own")
     p.add_argument("--json", action="store_true", help="Output raw JSON")

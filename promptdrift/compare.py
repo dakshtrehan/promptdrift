@@ -155,6 +155,8 @@ def compare(
     verbose: bool = True,
     checks=None,
     samples: int = 1,
+    bootstrap: int = 1000,
+    seed: int = 0,
 ) -> DiffReport:
     """
     Compare two prompt versions across a set of test cases.
@@ -163,7 +165,8 @@ def compare(
     latency deltas, structural drift, check flips, and an overall regression
     summary. ``checks`` is a default checks spec for cases without their own.
     ``samples`` > 1 calls each version that many times per case and reports
-    within-version drift (noise floor) and excess drift.
+    within-version drift (noise floor) and excess drift. ``bootstrap`` sets the
+    resamples for 95 percent CIs (0 disables); ``seed`` makes them reproducible.
     """
     if samples < 1:
         raise ValueError("samples must be at least 1")
@@ -190,6 +193,7 @@ def compare(
         version_a=str(cfg_a["version"]), version_b=str(cfg_b["version"]),
         model_a=cfg_a["model"], model_b=cfg_b["model"],
         total_cases=len(test_cases),
+        n_bootstrap=bootstrap, bootstrap_seed=seed,
     )
 
     for i, case in enumerate(test_cases):

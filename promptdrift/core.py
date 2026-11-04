@@ -81,6 +81,8 @@ class DiffReport:
     total_cases: int
     cases: list[CaseResult] = field(default_factory=list)
     mode: str = "live"                    # live (models called) | offline (stored outputs)
+    n_bootstrap: int = 1000               # bootstrap resamples for CIs; 0 disables
+    bootstrap_seed: int = 0
 
     @staticmethod
     def _is_regression(c: CaseResult) -> bool:
@@ -188,6 +190,28 @@ class DiffReport:
             "cases_above_noise": sum(c.excess_drift > threshold for c in multi),
         }
 
+    def confidence_intervals(self, level: float = 0.95) -> dict | None:
+        """Bootstrap CIs (percentile method, resampling cases) for the headline rates.
+
+        Returns ``{"level", "n_bootstrap", "avg_drift", "regression_rate"}`` plus
+        ``avg_excess_drift`` when cases have multiple samples, each a ``[lo, hi]``
+        list. None when there are no cases or ``n_bootstrap`` is 0.
+        """
+        if not self.cases or self.n_bootstrap <= 0:
+            return None
+        from .stats import bootstrap_cis
+
+        cols = {
+            "avg_drift": [c.drift_score for c in self.cases],
+            "regression_rate": [1.0 if self._is_regression(c) else 0.0 for c in self.cases],
+        }
+        if any(c.excess_drift is not None for c in self.cases):
+            cols["avg_excess_drift"] = [c.excess_drift for c in self.cases]
+        cis = bootstrap_cis(cols, self.n_bootstrap, self.bootstrap_seed, level)
+        out = {"level": level, "n_bootstrap": self.n_bootstrap}
+        out.update({k: [round(lo, 4), round(hi, 4)] for k, (lo, hi) in cis.items()})
+        return out
+
     def to_dict(self) -> dict:
         return {
             "version_a": self.version_a,
@@ -205,6 +229,7 @@ class DiffReport:
                 "structural": self.structural_summary(),
                 "checks": self.checks_summary(),
                 "stability": self.stability_summary(),
+                "ci": self.confidence_intervals(),
             },
             "cases": [asdict(c) for c in self.cases],
         }

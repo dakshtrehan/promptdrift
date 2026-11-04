@@ -45,8 +45,18 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     dc = GRN if dp < 10 else YLW if dp < 30 else RED
     print(f"  {BOLD}Summary{R}")
     print(f"  {'─' * (W-2)}")
-    print(f"  Avg drift         {_bar(report.avg_drift, 22, dc)}  {dc}{BOLD}{dp}%{R}")
-    print(f"  Regression rate   {_bar(report.regression_rate, 22, RED)}  {RED}{BOLD}{rp}%{R}")
+    ci = report.confidence_intervals() or {}
+
+    def ci_s(key):
+        if key not in ci:
+            return ""
+        lo, hi = ci[key]
+        return f"  {DIM}95% CI {round(lo * 100, 1)} to {round(hi * 100, 1)}%{R}"
+
+    print(f"  Avg drift         {_bar(report.avg_drift, 22, dc)}  {dc}{BOLD}{dp}%{R}"
+          f"{ci_s('avg_drift')}")
+    print(f"  Regression rate   {_bar(report.regression_rate, 22, RED)}  {RED}{BOLD}{rp}%{R}"
+          f"{ci_s('regression_rate')}")
     print()
 
     ni = len(report.improvements)
