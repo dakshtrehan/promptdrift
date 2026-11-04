@@ -127,6 +127,11 @@ def _resolve_embedder(cfg: dict) -> BaseProvider | None:
         return None
 
 
+def cfg_embedding_requested(*configs) -> bool:
+    """True if any already-loaded config dict sets ``embedding_model``."""
+    return any(isinstance(c, dict) and c.get("embedding_model") for c in configs)
+
+
 # ── Main compare function ─────────────────────────────────────────────────────
 def compare(
     config_a: str | Path | dict,
@@ -142,6 +147,7 @@ def compare(
     bootstrap: int = 1000,
     seed: int = 0,
     judge_both_orders: bool = True,
+    similarity: str | None = None,
 ) -> DiffReport:
     """
     Compare two prompt versions across a set of test cases.
@@ -157,12 +163,20 @@ def compare(
     chosen from the environment (OpenAI if ``OPENAI_API_KEY`` is set, else
     Anthropic if ``ANTHROPIC_API_KEY`` is set). It runs in both orders and
     marks disagreements as ``inconsistent`` unless ``judge_both_orders=False``.
+
+    ``similarity`` is ``"tfidf"`` (free, offline, deterministic) or
+    ``"embedding"``. When ``None`` it is ``"embedding"`` only if a config sets
+    ``embedding_model``, otherwise ``"tfidf"``.
     """
     if samples < 1:
         raise ValueError("samples must be at least 1")
     cfg_a = load_config(config_a) if not isinstance(config_a, dict) else config_a
     cfg_b = load_config(config_b) if not isinstance(config_b, dict) else config_b
     test_cases = load_cases(cases) if not isinstance(cases, list) else cases
+    if similarity is None:
+        similarity = ("embedding" if cfg_embedding_requested(cfg_a, cfg_b) else "tfidf")
+    if similarity not in ("tfidf", "embedding"):
+        raise ValueError("similarity must be 'tfidf' or 'embedding'")
 
     if verbose:
         print(f"\n⚡ promptdrift")
@@ -175,9 +189,9 @@ def compare(
                           **(cfg_a.get("provider_options") or {}))
     prov_b = get_provider(cfg_b["provider"], model=cfg_b["model"],
                           **(cfg_b.get("provider_options") or {}))
-    emb_prov = _resolve_embedder(cfg_a)
-    if emb_prov is None and verbose:
-        print("  ⚠ No embedding provider available, using TF-IDF fallback (offline mode).\n")
+    emb_prov = _resolve_embedder(cfg_a) if similarity == "embedding" else None
+    if similarity == "embedding" and emb_prov is None and verbose:
+        print("  ⚠ No embedding provider available, using TF-IDF similarity instead.\n")
 
     judge_prov = resolve_judge(judge_provider, judge_model, verbose) if use_judge else None
 
@@ -186,6 +200,7 @@ def compare(
         model_a=cfg_a["model"], model_b=cfg_b["model"],
         total_cases=len(test_cases),
         n_bootstrap=bootstrap, bootstrap_seed=seed,
+        similarity="embedding" if emb_prov is not None else "tfidf",
     )
 
     for i, case in enumerate(test_cases):

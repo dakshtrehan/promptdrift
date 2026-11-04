@@ -90,6 +90,7 @@ def compare_outputs(
     bootstrap: int = 1000,
     seed: int = 0,
     judge_both_orders: bool = True,
+    embedder=None,
     verbose: bool = False,
 ) -> DiffReport:
     """Compare stored outputs. No model is called unless ``use_judge=True``.
@@ -98,7 +99,8 @@ def compare_outputs(
     ``load_outputs``). ``checks`` is a default checks spec for records that do
     not carry their own. ``bootstrap`` is the number of resamples for the 95
     percent CIs (0 disables) and ``seed`` makes them reproducible. Returns the
-    same ``DiffReport`` as ``compare``.
+    same ``DiffReport`` as ``compare``. Similarity is TF-IDF unless an
+    ``embedder`` (any object with ``embed``) is passed.
     """
     records = load_outputs(outputs) if not isinstance(outputs, list) else [
         _normalise(r, i) for i, r in enumerate(outputs)
@@ -109,7 +111,8 @@ def compare_outputs(
     report = DiffReport(version_a=str(version_a), version_b=str(version_b),
                         model_a=str(model_a), model_b=str(model_b),
                         total_cases=len(records), mode="offline",
-                        n_bootstrap=bootstrap, bootstrap_seed=seed)
+                        n_bootstrap=bootstrap, bootstrap_seed=seed,
+                        similarity="embedding" if embedder is not None else "tfidf")
     for i, rec in enumerate(records):
         if verbose:
             print(f"  [{i + 1}/{len(records)}] {rec['case_id']}")
@@ -118,6 +121,7 @@ def compare_outputs(
         if "checks" in rec:
             case["checks"] = rec["checks"]
         report.cases.append(score_case(case, rec["output_a"], rec["output_b"], judge=judge,
+                                       embedder=embedder,
                                        default_checks=checks,
                                        judge_both_orders=judge_both_orders))
     return report

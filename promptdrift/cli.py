@@ -27,6 +27,7 @@ def cmd_compare(args):
             judge_provider=args.judge_provider,
             judge_model=args.judge_model,
             judge_both_orders=not args.judge_single_order,
+            similarity=args.similarity,
             verbose=not args.quiet,
             checks=_load_checks(args.checks),
             samples=args.samples,
@@ -196,6 +197,8 @@ examples:
   promptdrift init --dir ./prompts
         """,
     )
+    from .version import __version__
+    parser.add_argument("--version", action="version", version=f"promptdrift {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     # compare
@@ -203,8 +206,11 @@ examples:
     cp.add_argument("config_a", help="Baseline prompt config (YAML/JSON)")
     cp.add_argument("config_b", help="New prompt config (YAML/JSON)")
     cp.add_argument("--cases", required=True, help="Test cases file (JSON/JSONL/YAML)")
-    cp.add_argument("--no-judge", action="store_true", help="Skip LLM-as-judge (embedding only, faster)")
+    cp.add_argument("--no-judge", action="store_true",
+                    help="Skip LLM-as-judge (similarity, structure and checks only)")
     _add_judge_args(cp)
+    cp.add_argument("--similarity", choices=["tfidf", "embedding"], default=None,
+                    help="tfidf (default, free, offline) or embedding (OpenAI/Ollama, opt-in)")
     cp.add_argument("--samples", "-n", type=int, default=1,
                     help="Samples per side per case; >1 reports noise floor and excess drift")
     _add_output_args(cp)

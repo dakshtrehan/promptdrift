@@ -4,6 +4,7 @@ Terminal reporter — the output that gets shared on Twitter.
 from __future__ import annotations
 import json
 from .core import DiffReport, CaseResult
+from .version import __version__
 
 # ANSI
 R = "\033[0m"; BOLD = "\033[1m"; DIM = "\033[2m"
@@ -32,7 +33,9 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     W = 72
     print()
     print(f"{BOLD}{ORG}{'━' * W}{R}")
-    print(f"{BOLD}  ⚡ promptdrift{R}  {DIM}v0.1.1 · github.com/dakshtrehan/promptdrift{R}")
+    print(f"{BOLD}  ⚡ promptdrift{R}  {DIM}v{__version__} · github.com/dakshtrehan/promptdrift{R}")
+    if report.mode == "offline":
+        print(f"  {DIM}offline mode: stored outputs, no generation calls{R}")
     print(f"{BOLD}{ORG}{'━' * W}{R}")
     print()
     print(f"  {DIM}A{R}  {BOLD}{report.version_a}{R}  {DIM}({report.model_a}){R}")

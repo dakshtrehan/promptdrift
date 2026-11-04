@@ -87,6 +87,7 @@ class DiffReport:
     mode: str = "live"                    # live (models called) | offline (stored outputs)
     n_bootstrap: int = 1000               # bootstrap resamples for CIs; 0 disables
     bootstrap_seed: int = 0
+    similarity: str = "tfidf"             # similarity backend requested: tfidf | embedding
 
     @staticmethod
     def _is_regression(c: CaseResult) -> bool:
@@ -243,6 +244,7 @@ class DiffReport:
             "model_b": self.model_b,
             "total_cases": self.total_cases,
             "mode": self.mode,
+            "similarity": self.similarity,
             "summary": {
                 "avg_drift": round(self.avg_drift, 4),
                 "regression_rate": round(self.regression_rate, 4),

@@ -13,7 +13,8 @@ from .offline import compare_outputs, load_outputs
 from .core import DiffReport, CaseResult
 from .reporter import print_report, save_report, print_json
 
-__version__ = "0.1.1"
+from .version import __version__
+
 __all__ = [
     "compare", "load_config", "load_cases",
     "compare_outputs", "load_outputs",

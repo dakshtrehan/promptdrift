@@ -207,3 +207,23 @@ public replacements listed in the README.
   sends them as `options.temperature` and `options.num_predict`.
 * New config field `provider_options` forwards extra keyword arguments to the
   provider constructor.
+
+## D9. TF-IDF stays the default similarity (task 9)
+
+* Default similarity is TF-IDF for both `compare` and `compare_outputs`. In
+  v0.1.1, `compare` silently used paid OpenAI embeddings whenever
+  `OPENAI_API_KEY` happened to be set, so the same command gave different numbers
+  (and cost money) depending on the environment. That was changed.
+* Embeddings are opt-in: `similarity="embedding"` / `--similarity embedding`, or
+  setting `embedding_model` in either config (that field only ever meant "use
+  embeddings", so honouring it keeps v0.1.1 configs working as their authors
+  intended). Offline mode takes an `embedder=` object.
+* If embeddings are requested but no embedder can be built, the run uses TF-IDF
+  and says so. The report records the requested backend in `similarity`, and
+  each case records the method that actually ran (`tfidf`, `embedding` or
+  `mixed`).
+* This is a behaviour change for users who had `OPENAI_API_KEY` set and no
+  `embedding_model`: their drift numbers move from the embedding scale to the
+  TF-IDF scale. It is listed under "Changed" in the CHANGELOG.
+* Added `--version` and a single-source `promptdrift/version.py`; the reporter no
+  longer hardcodes the version and labels offline reports.
