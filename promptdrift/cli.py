@@ -27,6 +27,7 @@ def cmd_compare(args):
             judge_provider=args.judge_provider,
             judge_model=args.judge_model,
             verbose=not args.quiet,
+            checks=_load_checks(args.checks),
         )
     except FileNotFoundError as e:
         print(f"\n  ✗ File not found: {e}", file=sys.stderr)
@@ -72,6 +73,7 @@ def cmd_diff(args):
             use_judge=args.judge,
             judge_provider=args.judge_provider,
             judge_model=args.judge_model,
+            checks=_load_checks(args.checks),
             verbose=args.verbose,
         )
     except FileNotFoundError as e:
@@ -131,7 +133,25 @@ def cmd_init(args):
     print(f"    promptdrift compare {out}/v1.yaml {out}/v2.yaml --cases {out}/golden.json\n")
 
 
+def _load_checks(path):
+    """Load a default checks spec from a JSON or YAML file (None when not given)."""
+    if not path:
+        return None
+    from .checks import normalize_checks
+
+    with open(path) as f:
+        if str(path).lower().endswith((".yaml", ".yml")):
+            import yaml
+            spec = yaml.safe_load(f)
+        else:
+            spec = json.load(f)
+    normalize_checks(spec, expected="")  # validate early; 'exact' may use each case's expected
+    return spec
+
+
 def _add_output_args(p):
+    p.add_argument("--checks", metavar="FILE",
+                   help="Default deterministic checks (JSON/YAML) for cases without their own")
     p.add_argument("--json", action="store_true", help="Output raw JSON")
     p.add_argument("--output", "-o", metavar="FILE", help="Save report to JSON file")
     p.add_argument("--summary", action="store_true", help="Summary only, no per-case details")

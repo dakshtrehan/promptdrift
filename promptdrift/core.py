@@ -54,6 +54,12 @@ class CaseResult:
     json_valid_b: bool | None = None
     json_validity_changed: bool | None = None
     length_ratio: float | None = None     # len(B) / len(A), None if A is empty
+    # deterministic checks (see promptdrift.checks); None when the case has no checks
+    checks_passed_a: bool | None = None
+    checks_passed_b: bool | None = None
+    check_flip: str | None = None         # pass_to_fail | fail_to_pass | None
+    check_results_a: list | None = None
+    check_results_b: list | None = None
 
 
 @dataclass
@@ -66,19 +72,40 @@ class DiffReport:
     cases: list[CaseResult] = field(default_factory=list)
     mode: str = "live"                    # live (models called) | offline (stored outputs)
 
+    @staticmethod
+    def _is_regression(c: CaseResult) -> bool:
+        return (c.drift_level == "regression" or c.judge_verdict == "regressed"
+                or c.check_flip == "pass_to_fail")
+
     @property
     def regressions(self) -> list[CaseResult]:
-        return [c for c in self.cases
-                if c.drift_level == "regression" or c.judge_verdict == "regressed"]
+        """Judge said regressed, or a deterministic check went from pass to fail."""
+        return [c for c in self.cases if self._is_regression(c)]
 
     @property
     def improvements(self) -> list[CaseResult]:
-        return [c for c in self.cases if c.judge_verdict == "improved"]
+        """Judge said improved, or a check went from fail to pass (and not a regression)."""
+        return [c for c in self.cases if not self._is_regression(c)
+                and (c.judge_verdict == "improved" or c.check_flip == "fail_to_pass")]
 
     @property
     def neutral(self) -> list[CaseResult]:
-        return [c for c in self.cases
-                if c not in self.regressions and c not in self.improvements]
+        imp = {id(c) for c in self.improvements}
+        return [c for c in self.cases if not self._is_regression(c) and id(c) not in imp]
+
+    def checks_summary(self) -> dict | None:
+        """Pass rates and flip counts over cases that have checks, or None if none do."""
+        checked = [c for c in self.cases if c.checks_passed_a is not None]
+        if not checked:
+            return None
+        n = len(checked)
+        return {
+            "cases_with_checks": n,
+            "pass_rate_a": round(sum(bool(c.checks_passed_a) for c in checked) / n, 4),
+            "pass_rate_b": round(sum(bool(c.checks_passed_b) for c in checked) / n, 4),
+            "pass_to_fail": sum(c.check_flip == "pass_to_fail" for c in checked),
+            "fail_to_pass": sum(c.check_flip == "fail_to_pass" for c in checked),
+        }
 
     @property
     def avg_drift(self) -> float:
@@ -141,6 +168,7 @@ class DiffReport:
                 "improvements": len(self.improvements),
                 "neutral": len(self.neutral),
                 "structural": self.structural_summary(),
+                "checks": self.checks_summary(),
             },
             "cases": [asdict(c) for c in self.cases],
         }

@@ -6,7 +6,8 @@ Input is JSONL (or a JSON array) with one record per case::
     {"case_id": "greet", "output_a": "Hello!", "output_b": "Hi there."}
 
 Optional fields per record: ``input`` and ``expected`` (context for the
-report and the optional judge).
+report and the optional judge) and ``checks`` (deterministic checks, see
+``promptdrift.checks``).
 """
 from __future__ import annotations
 
@@ -75,12 +76,14 @@ def compare_outputs(
     use_judge: bool = False,
     judge_provider=None,
     judge_model: str | None = None,
+    checks=None,
     verbose: bool = False,
 ) -> DiffReport:
     """Compare stored outputs. No model is called unless ``use_judge=True``.
 
     ``outputs`` is a path to JSONL/JSON or a list of record dicts (see
-    ``load_outputs``). Returns the same ``DiffReport`` as ``compare``.
+    ``load_outputs``). ``checks`` is a default checks spec for records that do
+    not carry their own. Returns the same ``DiffReport`` as ``compare``.
     """
     records = load_outputs(outputs) if not isinstance(outputs, list) else [
         _normalise(r, i) for i, r in enumerate(outputs)
@@ -99,5 +102,8 @@ def compare_outputs(
             print(f"  [{i + 1}/{len(records)}] {rec['case_id']}")
         case = {"id": rec["case_id"], "input": rec.get("input", ""),
                 "expected": rec.get("expected")}
-        report.cases.append(score_case(case, rec["output_a"], rec["output_b"], judge=judge))
+        if "checks" in rec:
+            case["checks"] = rec["checks"]
+        report.cases.append(score_case(case, rec["output_a"], rec["output_b"], judge=judge,
+                                       default_checks=checks))
     return report

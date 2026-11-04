@@ -55,6 +55,7 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     print(f"  {GRN}↑ Improved  {ni:3d}{R}   {RED}↓ Regressed {nr:3d}{R}   {DIM}→ Neutral   {nn:3d}{R}")
     print()
     _print_structural(report)
+    _print_checks(report)
 
     # Overall verdict
     if nr == 0 and dp < 5:
@@ -91,6 +92,11 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
 
         if c.format_changed:
             print(f"    {YLW}format  {c.signature_a} → {c.signature_b}{R}")
+        if c.check_flip:
+            fc = RED if c.check_flip == "pass_to_fail" else GRN
+            failed = [r["type"] for r in (c.check_results_b if c.check_flip == "pass_to_fail"
+                                          else c.check_results_a) or [] if not r["passed"]]
+            print(f"    {fc}checks  {c.check_flip.replace('_', ' ')} ({', '.join(failed)}){R}")
         if c.json_validity_changed:
             jc = RED if c.json_valid_a else GRN
             state = "valid → invalid" if c.json_valid_a else "invalid → valid"
@@ -133,6 +139,18 @@ def _print_structural(report: DiffReport):
     print(f"  {BOLD}Structure{R}  {fc}format changed {st['format_changes']}{R}   "
           f"{jc}JSON validity changed {st['json_validity_changes']}"
           f" (broken {st['json_broken']}){R}   {DIM}median length B/A {mlr_s}{R}")
+    print()
+
+
+def _print_checks(report: DiffReport):
+    cs = report.checks_summary()
+    if cs is None:
+        return
+    pa, pb = round(cs["pass_rate_a"] * 100, 1), round(cs["pass_rate_b"] * 100, 1)
+    fc = RED if cs["pass_to_fail"] else DIM
+    print(f"  {BOLD}Checks{R}     pass A {pa}%  B {pb}%  ({cs['cases_with_checks']} cases)   "
+          f"{fc}pass→fail {cs['pass_to_fail']}{R}   "
+          f"{GRN if cs['fail_to_pass'] else DIM}fail→pass {cs['fail_to_pass']}{R}")
     print()
 
 

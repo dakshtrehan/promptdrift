@@ -153,12 +153,14 @@ def compare(
     judge_provider: str = "openai",
     judge_model: str = "gpt-4o-mini",
     verbose: bool = True,
+    checks=None,
 ) -> DiffReport:
     """
     Compare two prompt versions across a set of test cases.
 
     Returns a DiffReport with per-case semantic drift, judge verdicts,
-    latency deltas, and an overall regression summary.
+    latency deltas, structural drift, check flips, and an overall regression
+    summary. ``checks`` is a default checks spec for cases without their own.
     """
     cfg_a = load_config(config_a) if not isinstance(config_a, dict) else config_a
     cfg_b = load_config(config_b) if not isinstance(config_b, dict) else config_b
@@ -203,6 +205,7 @@ def compare(
             latency_a=resp_a.latency, latency_b=resp_b.latency,
             tokens_a=resp_a.input_tokens + resp_a.output_tokens,
             tokens_b=resp_b.input_tokens + resp_b.output_tokens,
+            default_checks=checks,
         ))
 
     return report

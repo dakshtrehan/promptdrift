@@ -10,8 +10,8 @@ from __future__ import annotations
 import json
 import re
 
-__all__ = ["format_signature", "signature_string", "is_valid_json", "length_ratio",
-           "structural_diff"]
+__all__ = ["strip_fence", "format_signature", "signature_string", "is_valid_json",
+           "length_ratio", "structural_diff"]
 
 _FENCE = re.compile(r"^```[\w+-]*[ \t]*\n(.*?)\n?```$", re.DOTALL)
 _LIST_ITEM = re.compile(r"^\s*([-*+•]|\d+[.)])\s+")
@@ -20,7 +20,8 @@ _JSON_TYPES = {dict: "object", list: "array", str: "string", bool: "boolean",
                int: "number", float: "number", type(None): "null"}
 
 
-def _strip_fence(text: str) -> tuple[str, bool]:
+def strip_fence(text: str) -> tuple[str, bool]:
+    """Return ``(body, had_fence)``: the text with one surrounding code fence removed."""
     t = text.strip()
     m = _FENCE.match(t)
     if m:
@@ -40,7 +41,7 @@ def _json_type(body: str) -> str | None:
 
 def is_valid_json(text: str) -> bool:
     """True if ``text`` parses as JSON, allowing one surrounding markdown fence."""
-    return _json_type(_strip_fence(text)[0]) is not None
+    return _json_type(strip_fence(text)[0]) is not None
 
 
 def format_signature(text: str) -> dict:
@@ -51,7 +52,7 @@ def format_signature(text: str) -> dict:
     JSON), ``list`` (every non-blank line is a bullet or numbered item),
     ``headings`` (has a markdown heading) and ``line_count`` (non-blank lines).
     """
-    body, fenced = _strip_fence(text)
+    body, fenced = strip_fence(text)
     lines = [ln for ln in body.splitlines() if ln.strip()]
     jt = _json_type(body)
     return {

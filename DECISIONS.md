@@ -82,3 +82,26 @@ public replacements listed in the README.
   `json_broken` (valid in A, invalid in B) and `median_length_ratio`. Structural
   changes are reported, not counted as regressions: a format change can be
   intended, and the user can make it a hard failure with a check (task 4).
+
+## D4. Deterministic checks (task 4)
+
+* New module `promptdrift.checks` with three check types: `regex` (`re.search`,
+  optional flags `i`, `m`, `s`), `json_keys` (output parses as a JSON object,
+  one code fence allowed, and has every listed top-level key) and `exact`
+  (whitespace-trimmed by default, `ignore_case` optional). `exact` with no value
+  uses the case's `expected`, so existing golden files can opt in with
+  `"checks": {"exact": true}`.
+* Checks are given per case under `checks` (list or shorthand dict). A default
+  spec can be passed with `checks=` in Python or `--checks FILE` on the CLI and
+  applies to cases that have none. Specs are validated up front; a bad regex is a
+  `ValueError`, not a silent pass.
+* A case passes when every check passes. A pass in A that fails in B
+  (`pass_to_fail`) is counted as a regression and sets `drift_level` to
+  `regression`, because a deterministic failure is the most trustworthy
+  regression signal the tool has. A `fail_to_pass` counts as an improvement
+  unless something else made the case a regression. With no checks declared,
+  behaviour is exactly as in v0.1.1.
+* `expected` alone still does not trigger exact matching, keeping v0.1.1
+  semantics where `expected` is judge context only.
+* Summary adds `checks`: cases with checks, pass rate A and B, `pass_to_fail` and
+  `fail_to_pass` counts (or `null` when no case has checks).
