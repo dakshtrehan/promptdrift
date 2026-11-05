@@ -1,0 +1,7 @@
+[
+  {"id": "factual_01", "input": "What is the capital of France?", "expected": "Paris"},
+  {"id": "factual_02", "input": "What is 15% of 200?", "expected": "30"},
+  {"id": "reasoning_01", "input": "If a train travels 60 mph for 2.5 hours, how far does it go?"},
+  {"id": "summarize_01", "input": "Summarize: The quick brown fox jumps over the lazy dog. This sentence contains every letter of the alphabet."},
+  {"id": "code_01", "input": "Write a Python one-liner to reverse a string called s."}
+]

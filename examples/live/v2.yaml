@@ -1,0 +1,7 @@
+version: v2
+provider: openai
+model: gpt-4o-mini
+system: "You are a helpful assistant. Be accurate and concise."
+prompt_template: "Please answer the following: {input}"
+temperature: 0.0
+max_tokens: 256

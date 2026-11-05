@@ -1,0 +1,15 @@
+# Default checks for the offline support-assistant example.
+#
+# These apply to every record in outputs.jsonl that does not declare its own
+# "checks". Pass the file with:
+#
+#   promptdrift diff examples/offline/outputs.jsonl --checks examples/offline/checks.yaml
+#
+# A support reply must not leak an unfilled template placeholder such as
+# "[Customer Name]" or "{{name}}". The regex passes when no placeholder is
+# present anywhere in the output. Checks run on every sample of a
+# multi-sample record, and a side passes when at least half its samples pass,
+# so one placeholder in three samples shows up in check_pass_rate_b without
+# flipping the case.
+- type: regex
+  pattern: "^(?![\\s\\S]*(\\[[A-Za-z ]*[Nn]ame\\]|\\{\\{[^}]*\\}\\}))"

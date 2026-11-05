@@ -1,0 +1,100 @@
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ⚡ promptdrift  v0.2.0 · github.com/dakshtrehan/promptdrift
+  offline mode: stored outputs, no generation calls
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  A  v1  (stored)
+  B  v2  (stored)
+  Cases: 16
+
+  Summary
+  ──────────────────────────────────────────────────────────────────────
+  Avg drift         ████░░░░░░░░░░░░░░░░░░  17.9%  95% CI 7.8 to 30.4%
+  Regression rate   ███░░░░░░░░░░░░░░░░░░░  12.5%  95% CI 0.0 to 31.2%
+
+  ↑ Improved    1   ↓ Regressed   2   → Neutral    13
+
+  Structure  format changed 3   JSON validity changed 1 (broken 1)   median length B/A 1.21x
+
+  Checks     pass A 93.8%  B 87.5%  (16 cases)   pass→fail 2   fail→pass 1
+
+  Stability  n=3/side   noise floor 70.6% (A 64.5%, B 76.6%)   excess drift -12.7%   above noise 0/1
+
+  ──────────────────────────────────────────────────────────────────────
+  ✗  DO NOT SHIP: 2 regression(s) detected
+  ──────────────────────────────────────────────────────────────────────
+
+  Cases
+
+  ✗ refund_window  sim=93.8%  █░░░░░░░░░░░░░░░  -
+    in › How long do I have to request a refund after buying a plan?
+    checks  pass to fail (regex)
+
+  ✗ order_status_json  sim=75.0%  ████░░░░░░░░░░░░  -
+    in › Return the status of order A1001 as JSON with keys order_id...
+    format  json:object+lines:1 → lines:2-4
+    checks  pass to fail (json_keys)
+    json    valid → invalid
+
+  ◐ reset_password_steps  sim=87.5%  ██░░░░░░░░░░░░░░  -
+    in › How do I reset my password?
+    format  lines:1 → lines:5+
+
+  ◐ cancel_plan_fee  sim=90.5%  ██░░░░░░░░░░░░░░  -
+    in › Is there a fee if I cancel my plan early?
+    checks  fail to pass (regex)
+
+  ● greeting  sim=100.0%  ░░░░░░░░░░░░░░░░  -
+    in › Hi, is anyone there?
+
+  ◐ support_hours  sim=93.9%  █░░░░░░░░░░░░░░░  -
+    in › What are your support hours?
+
+  ● ship_to_canada  sim=100.0%  ░░░░░░░░░░░░░░░░  -
+    in › Do you ship to Canada?
+
+  ● change_email  sim=100.0%  ░░░░░░░░░░░░░░░░  -
+    in › Can I change the email address on my account?
+
+  ◑ warranty_length  sim=78.5%  ███░░░░░░░░░░░░░  -
+    in › How long is the hardware warranty?
+
+  ● price_currency  sim=100.0%  ░░░░░░░░░░░░░░░░  -
+    in › What currency are your prices in? Answer with the currency ...
+
+  ◑ angry_customer  sim=73.1%  ████░░░░░░░░░░░░  -
+    in › This is the third time my order has been delayed. I want to...
+
+  ◐ invoice_json_fenced  sim=84.3%  ███░░░░░░░░░░░░░  -
+    in › Return invoice 7731 as JSON with keys invoice_id, amount an...
+    format  json:object+lines:1 → fence+json:object+lines:1
+
+  ◕ refund_subject_line  sim=42.1%  █████████░░░░░░░  -
+    in › Suggest a subject line for a refund confirmation email.
+    stability n=3  noise=0.7058  excess=-0.1272
+
+  ● address_change  sim=100.0%  ░░░░░░░░░░░░░░░░  -
+    in › How do I change my shipping address?
+
+  ◕ reply_time  sim=11.2%  ██████████████░░  -
+    in › When will I get a reply to my ticket?
+
+  ◐ return_label  sim=84.3%  ███░░░░░░░░░░░░░  -
+    in › Where do I get a return label?
+
+  Regressions (2)
+  ──────────────────────────────────────────────────────────────────────
+
+  ✗ refund_window
+    Input:  How long do I have to request a refund after buying a plan?
+    A:      You can request a full refund within 30 days of purchase....
+    B:      You can request a full refund within 14 days of purchase....
+
+  ✗ order_status_json
+    Input:  Return the status of order A1001 as JSON with keys order_...
+    A:      {"order_id": "A1001", "status": "shipped", "eta": "2 busi...
+    B:      Sure, here is the status of your order: {"order_id": "A10...
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
