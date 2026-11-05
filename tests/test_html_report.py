@@ -269,7 +269,9 @@ def test_cli_diff_writes_html_csv_junit(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "HTML report saved" in out and "CSV saved" in out and "JUnit XML saved" in out
     page = html_p.read_text(encoding="utf-8")
-    assert "<!DOCTYPE html>" in page and page.count('<tbody class="case"') == 5
+    from promptdrift.offline import load_outputs
+    n = len(load_outputs("examples/outputs.jsonl"))
+    assert "<!DOCTYPE html>" in page and page.count('<tbody class="case"') == n >= 1
     assert csv_p.read_text(encoding="utf-8").startswith("case_id,tags,")
     assert junit_p.read_text(encoding="utf-8").startswith('<?xml version="1.0"')
 
