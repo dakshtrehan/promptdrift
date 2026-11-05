@@ -611,3 +611,83 @@ So that parallel work fits together, these names were fixed in advance:
   the scratchpad instead. README.md was being rewritten by hardening while
   the docs were written, so the README links to the site are left to that
   workstream (the URLs are listed in the structured result).
+
+## D-F. Workstream F: hardening and release readiness
+
+* **mypy targets 3.10, not 3.9.** mypy 2.x refuses `python_version = "3.9"`
+  (the oldest it accepts is 3.10). Pinning an old mypy forever was rejected;
+  the config targets 3.10 and 3.9 compatibility is enforced by the real 3.9
+  interpreter in the CI matrix plus a `compileall` step. The suite was also
+  run locally on a uv-installed CPython 3.9.25 (364 passed).
+* **mypy runs in its own CI job on 3.13**, not across the matrix: mypy's
+  version resolves differently per interpreter (2.x needs 3.10+), and a type
+  gate that changes with the interpreter is noise. The strict run is
+  reproducible with `python -m mypy promptdrift`; the bare `mypy` on this
+  machine is a uv tool with its own interpreter and sees no pytest or yaml
+  stubs, so the docs and CI use `python -m mypy`.
+* **Optional SDKs are typed as `Any` everywhere** (`follow_imports = "skip"`
+  plus `ignore_missing_imports` for openai, anthropic, requests, watchdog) so
+  the gate gives the same answer with or without the extras installed. Here
+  watchdog 7 happened to be installed and typed, which would have made a
+  `type: ignore` on the watchdog handler subclass unused on this machine and
+  required in CI; skipping the import removes that dependence.
+* **Protocols instead of `Any` for duck-typed providers.** `SupportsComplete`
+  and `SupportsEmbed` live in `promptdrift.providers` and are imported under
+  `TYPE_CHECKING` by judge, scoring, similarity, compare and offline, so no
+  import cycle or runtime cost. They are not `runtime_checkable`: the API
+  has always accepted any object with the right method and should keep doing
+  so without `isinstance` games.
+* **Annotation-only edits, with three tiny runtime changes** that are
+  behaviour-preserving: the CLI passes the `--max-*` limits as explicit
+  keyword arguments instead of `**dict`, `judge_both_orders` tests the
+  tuples (`ab is None or ba is None`) instead of their first elements, and
+  `stability_summary` guards `excess_drift is not None` before comparing.
+  Two real fixes rode along and are in the changelog: `compare()` with
+  config dicts that omit `system`, `temperature` or `max_tokens` no longer
+  raises `KeyError` (same defaults as `load_config`), and the drift of
+  identical outputs is clamped at `0.0` so `-0.0` never appears in reports.
+* **ruff rule set unchanged.** Trying `UP` and `SIM` produced 89 findings,
+  mostly `Optional[X]` to `X | None` rewrites in runtime-evaluated positions
+  and contextlib.suppress suggestions; adopting them would be churn across
+  files other workstreams own and partly conflicts with the 3.9 rule. Noted
+  here; a later release can adopt them in one sweep.
+* **Coverage** is measured over `promptdrift` and `action` (99.25 percent,
+  364 tests at the time of the final gate) with `fail_under = 90`. The
+  pytest11 shim from workstream C already keeps import-time lines visible to
+  pytest-cov, so no `coverage run` wrapper was needed.
+* **Sdist contents.** The sdist ships `action.yml`, `action/`, `examples/`,
+  `benchmark/`, `tests/` and `.github/workflows/` so `pytest` passes from an
+  unpacked sdist (verified: 323 passed), and leaves out `docs/` (1.3 MB of
+  screenshots) together with `tests/test_docs.py`, which only checks the
+  docs site. A `docs` extra in pyproject mirrors `docs/requirements.txt`.
+* **Benchmark results were not regenerated**, only the version string was
+  updated. Regenerating with `--no-embeddings` would have replaced the
+  honest "model download blocked by the proxy" record with "skipped by
+  flag"; instead the script was re-run with `--no-write` and the numbers
+  (AUC 0.792, threshold 0.315, accuracy 73.5 percent) confirmed unchanged,
+  which they must be since the TF-IDF code did not change.
+* **Terminal demo** is a static SVG plus a six-frame GIF, both rendered by a
+  scratchpad script from the captured ANSI output of
+  `promptdrift diff examples/offline/outputs.jsonl --name-a v1 --name-b v2 --checks examples/offline/checks.yaml --summary`.
+  asciinema and agg were not tried: GitHub release downloads are not
+  reachable through the proxy and a hand-rendered SVG needs no binary. The
+  GIF uses DejaVu Sans Mono from the system; the SVG relies on the viewer's
+  monospace font.
+* **README snippets** were all executed in a scratch copy before going in;
+  the one `evaluate_thresholds` output comment shows the real list. Snippets
+  that need a key (`compare`, `--judge`) are labelled as such and not run.
+* **CI plugin smoke asserts the failure**, because the offline example
+  regresses on purpose: the job requires exit code 1 and a JUnit file with
+  17 tests and 3 failures (two cases plus the summary), rather than a green
+  run that would prove nothing.
+* **Release checklist** in RELEASE.md is ordered: merge v0.2.0, merge this
+  PR, enable Pages (Source: GitHub Actions) once, tag `v0.3.0`, moving
+  `v0.3` tag for the action, GitHub release notes from the changelog, PyPI
+  by the maintainer with their own token, post-release checks. None of
+  these steps were performed.
+* **Python 3.9 was executed locally** (uv-installed 3.9.25, dev extras
+  installed, full suite). One run of the full suite on 3.9 failed
+  `tests/test_pytest_plugin.py::test_html_skipped_when_module_missing`
+  once while another workstream was committing; it passed alone, with the
+  new docs tests, and in the repeated full runs afterwards, so it is treated
+  as a transient of the shared tree rather than a 3.9 incompatibility.
