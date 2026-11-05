@@ -1,6 +1,6 @@
 # Contributing to promptdrift
 
-Thanks for wanting to contribute. Here's how to get set up.
+Thanks for wanting to contribute. Here is how to get set up.
 
 ## Setup
 
@@ -10,16 +10,37 @@ cd promptdrift
 pip install -e ".[dev]"
 ```
 
-## Running tests
+## Running the checks
 
 ```bash
-pytest -q --cov=promptdrift
+ruff check .                                   # lint, whole repository
+python -m mypy promptdrift                     # strict type check (config in pyproject.toml)
+pytest -q --cov=promptdrift --cov=action       # tests with coverage
 ```
 
 The suite needs no API keys and makes no network calls: every provider is
 mocked (the Anthropic wire-format test drives the real SDK through a mock HTTP
-transport). Coverage must stay at or above 90 percent; CI enforces it on Python
-3.9 to 3.13.
+transport). Run it with the keys blanked to be sure:
+
+```bash
+OPENAI_API_KEY= ANTHROPIC_API_KEY= pytest -q
+```
+
+Coverage must stay at or above 90 percent and CI enforces it on Python 3.9 to
+3.13. New modules need tests at 90 percent or better. Code must stay Python
+3.9 compatible: keep `from __future__ import annotations`, no `match`
+statements, and `typing.Optional` / `typing.Union` where a type is evaluated
+at runtime.
+
+To try the examples and the pytest plugin locally:
+
+```bash
+bash examples/offline/run.sh                    # exits 1 on purpose, two regressions
+pytest --promptdrift examples/offline/outputs.jsonl --promptdrift-checks examples/offline/checks.yaml
+```
+
+The docs site is built with `pip install -r docs/requirements.txt` and
+`mkdocs build --strict`.
 
 ## Adding a provider
 
@@ -33,11 +54,13 @@ transport). Coverage must stay at or above 90 percent; CI enforces it on Python
 
 ## Code style
 
-```bash
-ruff check promptdrift/ tests/
-```
-
-No em dashes in docs, please.
+* `ruff check .` must pass; the rule set is in `pyproject.toml`. `ruff format`
+  is not enforced, so do not reformat files you are not otherwise changing.
+* Public functions carry type hints; `python -m mypy promptdrift` must pass.
+* No em dashes or en dashes in docs, docstrings or comments. Use commas, colons
+  or full stops.
+* Backward compatibility: public names, CLI flags and dataclass field order
+  stay. New dataclass fields go at the end with defaults.
 
 ## Submitting
 

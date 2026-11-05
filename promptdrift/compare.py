@@ -214,13 +214,19 @@ def compare(
             print(f"  [{i+1}/{len(test_cases)}] {case['id']}")
 
         inp = case["input"]
-        params_a = {"temperature": cfg_a["temperature"], "max_tokens": cfg_a["max_tokens"]}
-        params_b = {"temperature": cfg_b["temperature"], "max_tokens": cfg_b["max_tokens"]}
+        # Config dicts passed directly may omit the optional fields that
+        # load_config() fills in; use the same defaults here.
+        params_a = {"temperature": cfg_a.get("temperature", 0.0),
+                    "max_tokens": cfg_a.get("max_tokens", 1024)}
+        params_b = {"temperature": cfg_b.get("temperature", 0.0),
+                    "max_tokens": cfg_b.get("max_tokens", 1024)}
 
         prompt_a = render_prompt(cfg_a["prompt_template"], inp)
         prompt_b = render_prompt(cfg_b["prompt_template"], inp)
-        resps_a = [prov_a.complete(cfg_a["system"], prompt_a, **params_a) for _ in range(samples)]
-        resps_b = [prov_b.complete(cfg_b["system"], prompt_b, **params_b) for _ in range(samples)]
+        resps_a = [prov_a.complete(cfg_a.get("system", ""), prompt_a, **params_a)
+                   for _ in range(samples)]
+        resps_b = [prov_b.complete(cfg_b.get("system", ""), prompt_b, **params_b)
+                   for _ in range(samples)]
 
         texts_a = [r.text for r in resps_a]
         texts_b = [r.text for r in resps_b]

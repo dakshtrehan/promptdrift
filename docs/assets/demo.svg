@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="985" height="656" viewBox="0 0 985 656" font-family="SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="13">
+<title>promptdrift terminal demo</title>
+<rect width="985" height="656" rx="10" fill="#0d1117"/>
+<rect width="985" height="34" rx="10" fill="#161b22"/>
+<rect y="24" width="985" height="10" fill="#161b22"/>
+<circle cx="20" cy="17" r="6" fill="#ff5f56"/><circle cx="40" cy="17" r="6" fill="#ffbd2e"/><circle cx="60" cy="17" r="6" fill="#27c93f"/>
+<text x="492" y="21" text-anchor="middle" fill="#8b949e" font-size="12">promptdrift</text>
+<text x="18" y="64" xml:space="preserve" fill="#e6edf3"><tspan fill="#56d364">$</tspan> promptdrift diff examples/offline/outputs.jsonl --name-a v1 --name-b v2 --checks examples/offline/checks.yaml --summary</text>
+<text x="18" y="84" xml:space="preserve"></text>
+<text x="18" y="104" xml:space="preserve"><tspan fill="#ff8c37" font-weight="bold">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</tspan></text>
+<text x="18" y="124" xml:space="preserve"><tspan fill="#e6edf3" font-weight="bold">  ⚡ promptdrift</tspan><tspan fill="#e6edf3">  </tspan><tspan fill="#8b949e">v0.3.0 · github.com/dakshtrehan/promptdrift</tspan></text>
+<text x="18" y="144" xml:space="preserve"><tspan fill="#e6edf3">  </tspan><tspan fill="#8b949e">offline mode: stored outputs, no generation calls</tspan></text>
+<text x="18" y="164" xml:space="preserve"><tspan fill="#ff8c37" font-weight="bold">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</tspan></text>
+<text x="18" y="184" xml:space="preserve"></text>
+<text x="18" y="204" xml:space="preserve"><tspan fill="#e6edf3">  </tspan><tspan fill="#8b949e">A</tspan><tspan fill="#e6edf3">  </tspan><tspan fill="#e6edf3" font-weight="bold">v1</tspan><tspan fill="#e6edf3">  </tspan><tspan fill="#8b949e">(stored)</tspan></text>
+<text x="18" y="224" xml:space="preserve"><tspan fill="#e6edf3">  </tspan><tspan fill="#8b949e">B</tspan><tspan fill="#e6edf3">  </tspan><tspan fill="#e6edf3" font-weight="bold">v2</tspan><tspan fill="#e6edf3">  </tspan><tspan fill="#8b949e">(stored)</tspan></text>
+<text x="18" y="244" xml:space="preserve"><tspan fill="#e6edf3">  </tspan><tspan fill="#8b949e">Cases: 16</tspan></text>
+<text x="18" y="264" xml:space="preserve"></text>
+<text x="18" y="284" xml:space="preserve"><tspan fill="#e6edf3">  </tspan><tspan fill="#e6edf3" font-weight="bold">Summary</tspan></text>
+<text x="18" y="304" xml:space="preserve"><tspan fill="#e6edf3">  ──────────────────────────────────────────────────────────────────────</tspan></text>
+<text x="18" y="324" xml:space="preserve"><tspan fill="#e6edf3">  Avg drift         </tspan><tspan fill="#e3b341">████</tspan><tspan fill="#e3b341" opacity="0.6">░░░░░░░░░░░░░░░░░░</tspan><tspan fill="#e6edf3">  </tspan><tspan fill="#e3b341" font-weight="bold">17.9%</tspan><tspan fill="#e6edf3">  </tspan><tspan fill="#8b949e">95% CI 7.8 to 30.4%</tspan></text>
+<text x="18" y="344" xml:space="preserve"><tspan fill="#e6edf3">  Regression rate   </tspan><tspan fill="#ff7b72">███</tspan><tspan fill="#ff7b72" opacity="0.6">░░░░░░░░░░░░░░░░░░░</tspan><tspan fill="#e6edf3">  </tspan><tspan fill="#ff7b72" font-weight="bold">12.5%</tspan><tspan fill="#e6edf3">  </tspan><tspan fill="#8b949e">95% CI 0.0 to 31.2%</tspan></text>
+<text x="18" y="364" xml:space="preserve"></text>
+<text x="18" y="384" xml:space="preserve"><tspan fill="#e6edf3">  </tspan><tspan fill="#56d364">↑ Improved    1</tspan><tspan fill="#e6edf3">   </tspan><tspan fill="#ff7b72">↓ Regressed   2</tspan><tspan fill="#e6edf3">   </tspan><tspan fill="#8b949e">→ Neutral    13</tspan></text>
+<text x="18" y="404" xml:space="preserve"></text>
+<text x="18" y="424" xml:space="preserve"><tspan fill="#e6edf3">  </tspan><tspan fill="#e6edf3" font-weight="bold">Structure</tspan><tspan fill="#e6edf3">  </tspan><tspan fill="#e3b341">format changed 3</tspan><tspan fill="#e6edf3">   </tspan><tspan fill="#ff7b72">JSON validity changed 1 (broken 1)</tspan><tspan fill="#e6edf3">   </tspan><tspan fill="#8b949e">median length B/A 1.21x</tspan></text>
+<text x="18" y="444" xml:space="preserve"></text>
+<text x="18" y="464" xml:space="preserve"><tspan fill="#e6edf3">  </tspan><tspan fill="#e6edf3" font-weight="bold">Checks</tspan><tspan fill="#e6edf3">     pass A 93.8%  B 87.5%  (16 cases)   </tspan><tspan fill="#ff7b72">pass→fail 2</tspan><tspan fill="#e6edf3">   </tspan><tspan fill="#56d364">fail→pass 1</tspan></text>
+<text x="18" y="484" xml:space="preserve"></text>
+<text x="18" y="504" xml:space="preserve"><tspan fill="#e6edf3">  </tspan><tspan fill="#e6edf3" font-weight="bold">Stability</tspan><tspan fill="#e6edf3">  n=3/side   noise floor 70.6% </tspan><tspan fill="#8b949e">(A 64.5%, B 76.6%)</tspan><tspan fill="#e6edf3">   </tspan><tspan fill="#8b949e">excess drift -12.7%</tspan><tspan fill="#e6edf3">   above noise 0/1</tspan></text>
+<text x="18" y="524" xml:space="preserve"></text>
+<text x="18" y="544" xml:space="preserve"><tspan fill="#e6edf3">  ──────────────────────────────────────────────────────────────────────</tspan></text>
+<text x="18" y="564" xml:space="preserve"><tspan fill="#ff7b72" font-weight="bold">  ✗  DO NOT SHIP: 2 regression(s) detected</tspan></text>
+<text x="18" y="584" xml:space="preserve"><tspan fill="#e6edf3">  ──────────────────────────────────────────────────────────────────────</tspan></text>
+<text x="18" y="604" xml:space="preserve"></text>
+<text x="18" y="624" xml:space="preserve"><tspan fill="#ff8c37" font-weight="bold">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</tspan></text>
+</svg>

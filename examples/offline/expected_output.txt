@@ -1,6 +1,6 @@
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  ⚡ promptdrift  v0.2.0 · github.com/dakshtrehan/promptdrift
+  ⚡ promptdrift  v0.3.0 · github.com/dakshtrehan/promptdrift
   offline mode: stored outputs, no generation calls
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

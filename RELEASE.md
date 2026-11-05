@@ -1,3 +1,69 @@
+# Releasing promptdrift
+
+## Release checklist for 0.3.0
+
+Nothing in this repository releases anything on its own: no workflow tags,
+publishes or deploys unless a maintainer takes one of the steps below. Do
+them in this order.
+
+1. **Merge the v0.2.0 pull request** into `main` first. The v0.3.0 branch was
+   cut from it, so merging it first keeps the v0.3.0 diff small and keeps the
+   history linear.
+2. **Merge the v0.3.0 pull request.** CI must be green on every job: the test
+   matrix (Python 3.9 to 3.13), mypy, the core-only install, the examples and
+   plugin job, the package job, and the `promptdrift example` workflow that
+   dogfoods the GitHub Action. That dogfood run is the first time the action
+   executes on a real runner, so read its log before tagging.
+3. **Enable GitHub Pages once.** In the repository settings open Pages and set
+   Source to "GitHub Actions". The docs workflow (`.github/workflows/docs.yml`)
+   deploys on every push to `main`; the first deploy after the merge publishes
+   https://dakshtrehan.github.io/promptdrift/. Check the quickstart and the API
+   reference pages render.
+4. **Tag the release** from a clean checkout of `main`:
+
+   ```bash
+   git checkout main && git pull origin main
+   git tag -a v0.3.0 -m "promptdrift 0.3.0"
+   git push origin v0.3.0
+   ```
+
+5. **Moving major tag for the action.** Users pin `uses: dakshtrehan/promptdrift@v0.3`
+   to get patch releases without editing their workflow. Create it now and move
+   it on every 0.3.x release:
+
+   ```bash
+   git tag -f v0.3 v0.3.0
+   git push -f origin v0.3
+   ```
+
+6. **GitHub release notes.** Create a GitHub Release for tag `v0.3.0` and paste
+   the `[0.3.0]` section of `CHANGELOG.md` as the body. Note: publishing the
+   release triggers `.github/workflows/publish.yml`, which only succeeds if PyPI
+   trusted publishing is configured (see "A note on publish.yml" below). If you
+   publish to PyPI by hand instead, either disable that workflow first or accept
+   one failed run.
+7. **Publish to PyPI, maintainer only, with your own token.** Follow sections 0
+   to 4 below with `0.3.0` in place of `0.2.0`. No CI job and no agent uploads
+   to PyPI; the token never enters the repository.
+8. **Post-release checks:**
+
+   ```bash
+   python -m venv /tmp/pd-check && /tmp/pd-check/bin/pip install "git+https://github.com/dakshtrehan/promptdrift.git@v0.3.0"
+   /tmp/pd-check/bin/promptdrift --version      # promptdrift 0.3.0
+   /tmp/pd-check/bin/promptdrift diff examples/offline/outputs.jsonl --summary
+   ```
+
+   Once the PyPI upload is done, repeat with `pip install promptdrift==0.3.0`.
+   Then, in any repository, run a workflow with `uses: dakshtrehan/promptdrift@v0.3.0`
+   and one with `@v0.3` on a pull request and confirm the comment, the job
+   summary and the artifact appear.
+9. **After the PyPI upload**, follow section 6 below to restore the
+   `pip install promptdrift` instructions in the README and drop the "not yet
+   published" lines from `README.md` and `CHANGELOG.md`.
+
+The sections below are the original 0.2.0 publishing notes; the commands are
+the same for 0.3.0 with the version number changed.
+
 # Releasing promptdrift 0.2.0 to PyPI
 
 promptdrift has never been published. On 2026-11-04, `promptdrift` (and the

@@ -48,7 +48,8 @@ def pairwise_drift(samples: Sequence[str],
     if not pairs:
         return None
     methods: set[str] = set()
-    return sum(1.0 - _sim(a, b, embedder, methods) for a, b in pairs) / len(pairs)
+    # max(0.0, ...) keeps identical samples at exactly 0.0 instead of -0.0 from rounding
+    return max(0.0, sum(1.0 - _sim(a, b, embedder, methods) for a, b in pairs) / len(pairs))
 
 
 def _as_samples(x: Union[str, Sequence[Optional[str]]]) -> list[str]:
@@ -97,7 +98,9 @@ def score_case(
     methods: set[str] = set()
 
     cross = [1.0 - _sim(a, b, emb, methods) for a in sa for b in sb]
-    drift = sum(cross) / len(cross)
+    # cosine similarity of identical vectors can exceed 1.0 by one ulp, which would
+    # make the drift of identical outputs round to -0.0; clamp it at 0.0
+    drift = max(0.0, sum(cross) / len(cross))
     sim = 1.0 - drift
     level = classify_drift(sim)
 

@@ -83,7 +83,7 @@ select = ["E", "F", "W", "I", "B"]
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["promptdrift"]
+source = ["promptdrift", "action"]
 
 [tool.coverage.report]
 fail_under = 90
