@@ -66,9 +66,26 @@ def _emit(report, args):
         save_report(report, args.output)
     _emit_exports(report, args)
 
+    # Threshold gates (--max-drift and friends): one line per breach on stderr, exit 1.
+    failures = _threshold_failures(report, args)
+    if failures:
+        for line in failures:
+            print(f"  ✗ {line}", file=sys.stderr)
+        sys.exit(1)
+
     # Exit 1 in CI if regressions found
     if report.regressions and args.fail_on_regression:
         sys.exit(1)
+
+
+def _threshold_failures(report, args):
+    """Evaluate --max-* gates; getattr keeps older Namespace objects working."""
+    limits = {k: getattr(args, k, None)
+              for k in ("max_drift", "max_regressions", "max_format_changes", "max_flips")}
+    if all(v is None for v in limits.values()):
+        return []
+    from .thresholds import evaluate_thresholds
+    return evaluate_thresholds(report, **limits)
 
 
 def _emit_exports(report, args):
@@ -215,6 +232,14 @@ def _add_output_args(p):
                    help="Show truncated A/B outputs per case")
     p.add_argument("--fail-on-regression", action="store_true",
                    help="Exit 1 if regressions found (CI)")
+    p.add_argument("--max-drift", type=float, default=None, metavar="X",
+                   help="Exit 1 when average drift exceeds X (fraction, e.g. 0.1 for 10%%)")
+    p.add_argument("--max-regressions", type=int, default=None, metavar="N",
+                   help="Exit 1 when more than N cases regressed")
+    p.add_argument("--max-format-changes", type=int, default=None, metavar="N",
+                   help="Exit 1 when more than N cases changed output format")
+    p.add_argument("--max-flips", type=int, default=None, metavar="N",
+                   help="Exit 1 when more than N checks flipped from pass to fail")
 
 
 def main(argv=None):
