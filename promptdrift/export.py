@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Optional, Union
@@ -38,6 +39,42 @@ CSV_COLUMNS = [
 #: Extra columns appended when ``include_outputs=True``.
 OUTPUT_COLUMNS = ["input", "output_a", "output_b"]
 
+# Characters XML 1.0 does not allow anywhere in a document (C0 controls other
+# than tab, LF and CR, lone surrogates, U+FFFE and U+FFFF). ElementTree writes
+# them out raw, which makes the whole file unparseable.
+_XML_ILLEGAL = re.compile(r"[^\t\n\r\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+# Lone UTF-16 surrogates (for example an emoji cut in half by a JavaScript
+# slice) cannot be encoded as UTF-8 and would crash a strict write.
+_SURROGATE = re.compile(r"[\ud800-\udfff]")
+# A spreadsheet treats a cell that starts with one of these as a formula.
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _visible_escape(m: re.Match[str]) -> str:
+    code = ord(m.group(0))
+    return f"\\x{code:02x}" if code <= 0xFF else f"\\u{code:04x}"
+
+
+def _xml_safe(text: str) -> str:
+    """Replace characters that XML 1.0 forbids with a visible escape such as ``\\x1b``."""
+    return _XML_ILLEGAL.sub(_visible_escape, text)
+
+
+def _utf8_safe(text: str) -> str:
+    """Replace lone surrogates with U+FFFD so ``text`` can be written as strict UTF-8."""
+    return _SURROGATE.sub("\ufffd", text)
+
+
+def _formula_safe(value: object) -> object:
+    """Prefix a single quote when a spreadsheet would read ``value`` as a formula."""
+    if isinstance(value, str) and value.startswith(_FORMULA_START):
+        return "'" + value
+    return value
+
+
+def _as_is(value: object) -> object:
+    return value
+
 
 def _cell(value: object) -> str:
     """Render one scalar for CSV: None becomes empty, bools become true/false."""
@@ -48,10 +85,11 @@ def _cell(value: object) -> str:
     return str(value)
 
 
-def _row(c: CaseResult, include_outputs: bool) -> list[str]:
+def _row(c: CaseResult, include_outputs: bool, escape_formulas: bool = True) -> list[str]:
+    guard = _formula_safe if escape_formulas else _as_is
     values = {
-        "case_id": c.case_id,
-        "tags": ";".join(c.tags) if c.tags else "",
+        "case_id": guard(c.case_id),
+        "tags": guard(";".join(c.tags)) if c.tags else "",
         "similarity": c.similarity,
         "drift_score": c.drift_score,
         "drift_level": c.drift_level,
@@ -74,16 +112,24 @@ def _row(c: CaseResult, include_outputs: bool) -> list[str]:
     }
     row = [_cell(values[k]) for k in CSV_COLUMNS]
     if include_outputs:
-        row += [c.input, c.output_a, c.output_b]
+        row += [_cell(guard(v)) for v in (c.input, c.output_a, c.output_b)]
     return row
 
 
-def to_csv(report: DiffReport, include_outputs: bool = False) -> str:
+def to_csv(report: DiffReport, include_outputs: bool = False, *,
+           escape_formulas: bool = True) -> str:
     """Render the report as CSV text, one row per case (see ``CSV_COLUMNS``).
 
     ``include_outputs=True`` appends the ``OUTPUT_COLUMNS`` (``input``,
     ``output_a``, ``output_b``) with the full texts (newlines are quoted by the csv module). Tags
     are joined with ``;``. Uses ``\\r\\n`` line endings as RFC 4180 expects.
+
+    Text cells (case id, tags and the outputs) that start with ``=``, ``+``,
+    ``-``, ``@``, a tab or a carriage return get a leading ``'`` so a
+    spreadsheet shows them as text instead of running them as a formula (CSV
+    injection). Numeric columns are never changed. Pass
+    ``escape_formulas=False`` for the raw text, for example when the file is
+    only read back with pandas.
     """
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\r\n")
@@ -92,14 +138,19 @@ def to_csv(report: DiffReport, include_outputs: bool = False) -> str:
         header += OUTPUT_COLUMNS
     writer.writerow(header)
     for c in report.cases:
-        writer.writerow(_row(c, include_outputs))
+        writer.writerow(_row(c, include_outputs, escape_formulas))
     return buf.getvalue()
 
 
-def save_csv(report: DiffReport, path: Union[str, Path], include_outputs: bool = False) -> None:
-    """Write ``to_csv(report)`` to ``path`` as UTF-8 (``newline=""`` so rows are not doubled)."""
+def save_csv(report: DiffReport, path: Union[str, Path], include_outputs: bool = False, *,
+             escape_formulas: bool = True) -> None:
+    """Write ``to_csv(report)`` to ``path`` as UTF-8 (``newline=""`` so rows are not doubled).
+
+    Lone surrogates in the text become U+FFFD so the strict UTF-8 write cannot fail.
+    """
+    text = to_csv(report, include_outputs=include_outputs, escape_formulas=escape_formulas)
     with open(path, "w", encoding="utf-8", newline="") as f:
-        f.write(to_csv(report, include_outputs=include_outputs))
+        f.write(_utf8_safe(text))
 
 
 # ── JUnit XML ────────────────────────────────────────────────────────────────
@@ -152,7 +203,10 @@ def to_junit(report: DiffReport) -> str:
     The classname is ``"<version_a> vs <version_b>"``, or the case's first tag
     when it has tags. Regressions carry a ``<failure>`` whose message says
     why; judge errors carry an ``<error>``; ``<system-out>`` holds a one line
-    summary per case. Everything is escaped by ``xml.etree``.
+    summary per case. Markup characters are escaped by ``xml.etree``;
+    characters that XML 1.0 forbids (C0 controls such as NUL or the ESC of an
+    ANSI colour code, lone surrogates, U+FFFE and U+FFFF) are replaced with a
+    visible escape such as ``\\x1b`` so the file always parses.
     """
     status, reason = verdict_for(report)
     cases = report.cases
@@ -213,7 +267,10 @@ def to_junit(report: DiffReport) -> str:
     out.text = "\n".join(lines)
     ET.SubElement(suite, "system-err").text = ""
 
-    xml = ET.tostring(suites, encoding="unicode")
+    # ElementTree leaves forbidden characters raw and real markup never
+    # contains them, so one pass over the serialised text covers every
+    # attribute and text node.
+    xml = _xml_safe(ET.tostring(suites, encoding="unicode"))
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + xml + "\n"
 
 
