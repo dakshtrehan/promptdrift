@@ -9,16 +9,22 @@ them in this order.
 1. **Merge the v0.2.0 pull request** into `main` first. The v0.3.0 branch was
    cut from it, so merging it first keeps the v0.3.0 diff small and keeps the
    history linear.
-2. **Merge the v0.3.0 pull request.** CI must be green on every job: the test
+2. **Enable GitHub Pages once, before merging v0.3.0.** In the repository
+   settings open Pages and set Source to "GitHub Actions" (this works before
+   any Pages workflow has run on `main`). The docs workflow
+   (`.github/workflows/docs.yml`) deploys on every push to `main`, so the merge
+   in step 3 publishes https://dakshtrehan.github.io/promptdrift/. If Pages was
+   enabled only after the merge, the deploy job of that first run fails: run the
+   docs workflow again from the Actions tab ("Run workflow" on `main`, it has a
+   `workflow_dispatch` trigger) or re-run its failed jobs.
+3. **Merge the v0.3.0 pull request.** CI must be green on every job: the test
    matrix (Python 3.9 to 3.13), mypy, the core-only install, the examples and
    plugin job, the package job, and the `promptdrift example` workflow that
-   dogfoods the GitHub Action. That dogfood run is the first time the action
-   executes on a real runner, so read its log before tagging.
-3. **Enable GitHub Pages once.** In the repository settings open Pages and set
-   Source to "GitHub Actions". The docs workflow (`.github/workflows/docs.yml`)
-   deploys on every push to `main`; the first deploy after the merge publishes
-   https://dakshtrehan.github.io/promptdrift/. Check the quickstart and the API
-   reference pages render.
+   dogfoods the GitHub Action on this repository's own pull requests. Read the
+   log of that dogfood run and the PR comment it posted before tagging; the
+   first run from an external repository is step 8. After the merge, check that
+   the docs deploy succeeded and that the quickstart and the API reference
+   pages render.
 4. **Tag the release** from a clean checkout of `main`:
 
    ```bash
@@ -58,8 +64,10 @@ them in this order.
    and one with `@v0.3` on a pull request and confirm the comment, the job
    summary and the artifact appear.
 9. **After the PyPI upload**, follow section 6 below to restore the
-   `pip install promptdrift` instructions in the README and drop the "not yet
-   published" lines from `README.md` and `CHANGELOG.md`.
+   `pip install promptdrift` instructions in the README, drop the "not yet
+   published" line from `README.md` and from the `[0.3.0]` entry of
+   `CHANGELOG.md`, and mark the never uploaded `[0.2.0]` entry as superseded
+   (section 6, step 3).
 
 The sections below are the original 0.2.0 publishing notes; the commands are
 the same for 0.3.0 with the version number changed.
@@ -235,5 +243,7 @@ The README deliberately says the package is not on PyPI yet. Once
    [![PyPI version](https://img.shields.io/pypi/v/promptdrift.svg)](https://pypi.org/project/promptdrift/)
    ```
 
-3. In `CHANGELOG.md`, delete the line "Not yet published to PyPI. See
-   RELEASE.md for the publishing steps."
+3. In `CHANGELOG.md`, delete the "Not yet published to PyPI" line under the
+   version you just uploaded (for 0.3.0, the line under `[0.3.0]`). If an
+   older entry such as `[0.2.0]` was never uploaded, change its line to "Never
+   published to PyPI; superseded by 0.3.0." instead of deleting it.

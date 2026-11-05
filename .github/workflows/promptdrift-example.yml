@@ -31,7 +31,7 @@ jobs:
       threshold-failures: ${{ steps.drift.outputs.threshold-failures }}
       comment-id: ${{ steps.drift.outputs.comment-id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Compare logged outputs with the action
         id: drift
