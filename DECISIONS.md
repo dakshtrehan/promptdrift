@@ -691,3 +691,15 @@ So that parallel work fits together, these names were fixed in advance:
   once while another workstream was committing; it passed alone, with the
   new docs tests, and in the repeated full runs afterwards, so it is treated
   as a transient of the shared tree rather than a 3.9 incompatibility.
+* **Correction to the 3.9 note above.** The failure of
+  `test_html_skipped_when_module_missing` was not a transient of the shared
+  tree: it was order dependent and reproducible (it failed on every
+  standalone run of `tests/test_pytest_plugin.py` on 3.13, before and after
+  the hardening changes, and in roughly half of the full-suite runs on 3.9).
+  The inner pytester run emits pytest's "module already imported so cannot
+  be rewritten" warning for the plugin whenever an earlier test imported
+  it, and Python shows a warning once per location per process, so the
+  exact `warnings=1` count varied with test order. The count assertion was
+  removed; the test still asserts the outcomes and the presence of the
+  `--promptdrift-html ignored` warning. After the fix the full suite passed
+  twice on 3.9 and on 3.13, and the file passes standalone on both.
