@@ -275,3 +275,52 @@ public replacements listed in the README.
 * The existing `publish.yml` (trusted publishing on GitHub Release) was left in
   place. RELEASE.md explains that it conflicts with a manual token upload of the
   same version if a GitHub Release is also published, and how to choose one route.
+
+# Decisions log for v0.3.0
+
+v0.3.0 was built unattended on top of the v0.2.0 branch, with the work split
+into six workstreams run by separate agents and then an adversarial review pass.
+Each workstream appends its own section below. Entries made before the
+workstreams started are numbered D12 onwards.
+
+## D12. Branching and orchestration
+
+* The branch starts from the open v0.2.0 PR branch (`claude/adoring-keller-fuc8cc`)
+  rather than `main`, so v0.3.0 builds on the tested v0.2.0 code and the PR will
+  show only the v0.3.0 delta once v0.2.0 merges.
+* Workstreams were ordered by dependency: HTML report and exports (B) and
+  examples/benchmark (E) first, because the GitHub Action (A) needs the HTML,
+  JUnit and Markdown outputs; then watch mode and the pytest plugin (C) with the
+  Action (A); then documentation (D) and hardening (F), which must describe the
+  finished features. A final adversarial review fans out over the integrated result.
+* The environment has no Docker daemon, so `act` cannot run. Action tests use a
+  small mocked runner that executes the composite steps with a fake GitHub API.
+* Hard rules carried into every workstream: every paid model call is mocked,
+  nothing is published or deployed outside this repo's own CI, v0.2.0 public
+  names and behaviour stay unchanged, and docs contain no em dashes.
+
+## D13. Interface contracts agreed before implementation
+
+So that parallel work fits together, these names were fixed in advance:
+
+* `promptdrift.html_report`: `render_html(report) -> str`, `save_html(report, path)`.
+  Self-contained file, inline CSS and JS, no external requests.
+* `promptdrift.export`: `to_csv(report) -> str`, `save_csv(report, path)`,
+  `to_junit(report) -> str`, `save_junit(report, path)`.
+* `promptdrift.markdown`: `render_markdown(report, ...) -> str` for PR comments
+  and `GITHUB_STEP_SUMMARY`.
+* `promptdrift.thresholds`: `evaluate_thresholds(report, max_drift=None,
+  max_regressions=None, max_format_changes=None, max_flips=None,
+  fail_on_regression=False) -> list[str]` returning human readable failures.
+* CLI: `--html FILE`, `--csv FILE`, `--junit FILE`, `--max-drift X`,
+  `--max-regressions N`, `--max-format-changes N`, `--max-flips N` on both
+  `compare` and `diff`; new `watch` subcommand that wraps `compare` or `diff`.
+* `CaseResult.tags: list[str] | None` appended with a default, fed from an
+  optional `tags` list on cases and offline records, for per-tag breakdowns.
+* pytest plugin module `promptdrift.pytest_plugin`, registered through the
+  `pytest11` entry point, inert unless `--promptdrift` is passed.
+* Composite action at the repo root (`action.yml`) with helper scripts under
+  `action/`, so `uses: dakshtrehan/promptdrift@<ref>` works.
+* Docs site under `docs/` built by `mkdocs.yml` with mkdocs-material and
+  mkdocstrings, deployed by `.github/workflows/docs.yml` to this repo's Pages.
+* Version becomes 0.3.0 in `promptdrift/version.py` during hardening.
