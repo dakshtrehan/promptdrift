@@ -10,7 +10,8 @@ so the pieces can be unit tested:
 * ``build_outputs``        the action's outputs as a flat ``{name: str}`` dict
 * ``write_github_output``  append ``name=value`` lines to ``$GITHUB_OUTPUT``
 * ``write_step_summary``   append Markdown to ``$GITHUB_STEP_SUMMARY``
-* ``find_existing_comment`` page through a PR's issue comments for the marker
+* ``find_existing_comment`` page through a PR's issue comments for the action's
+                           own marked comment (Bot author or the token's user)
 * ``upsert_comment``       PATCH the marked comment or POST a new one
 * ``main(argv)``           glue, driven by ``INPUT_*`` and ``GITHUB_*`` env vars
 
@@ -92,22 +93,82 @@ def load_report(path: str) -> Optional[dict]:
     return data
 
 
+def _pct_pair(value: float, limit: float) -> Tuple[str, str]:
+    """Percentages for a value and its limit, with more decimals when one would tie."""
+    digits = 1
+    a = b = ""
+    for digits in range(1, 7):
+        a, b = f"{value * 100:.{digits}f}%", f"{limit * 100:.{digits}f}%"
+        if a != b:
+            break
+    if digits == 1:
+        return f"{round(value * 100, 1)}%", f"{round(limit * 100, 1)}%"
+    return a, b
+
+
+def _fallback_thresholds(report: Mapping[str, Any], max_drift: Optional[float],
+                         max_regressions: Optional[int], max_format_changes: Optional[int],
+                         max_flips: Optional[int], fail_on_regression: bool) -> list[str]:
+    """Stdlib copy of ``promptdrift.thresholds.evaluate_thresholds`` for a report dict.
+
+    Used when promptdrift is not importable from the interpreter running this
+    script (``install: skip`` with promptdrift in another Python, pipx or
+    ``uv tool``). The sentences match the library's word for word; a test
+    keeps the two in step.
+    """
+    s = report.get("summary") or {}
+    avg = float(s.get("avg_drift") or 0.0)
+    regressions = int(s.get("regressions") or 0)
+    fmt = int((s.get("structural") or {}).get("format_changes") or 0)
+    flips = int((s.get("checks") or {}).get("pass_to_fail") or 0)
+    out: list[str] = []
+    if max_drift is not None and avg > max_drift:
+        measured, limit = _pct_pair(avg, max_drift)
+        out.append(f"avg drift {measured} exceeds max-drift {limit}")
+    if fail_on_regression and regressions > 0:
+        out.append(f"{regressions} regression(s) found and fail-on-regression is set")
+    if max_regressions is not None and regressions > max_regressions:
+        out.append(f"{regressions} regression(s) exceed max-regressions {max_regressions}")
+    if max_format_changes is not None and fmt > max_format_changes:
+        out.append(f"{fmt} format change(s) exceed max-format-changes {max_format_changes}")
+    if max_flips is not None and flips > max_flips:
+        out.append(f"{flips} check flip(s) from pass to fail exceed max-flips {max_flips}")
+    return out
+
+
 def threshold_failures(report: Optional[dict], env: Mapping[str, str]) -> list[str]:
-    """Re-evaluate the threshold inputs against report.json (empty without promptdrift)."""
+    """Re-evaluate the threshold inputs against report.json.
+
+    Uses ``promptdrift.thresholds`` when it is importable and a stdlib copy of
+    the same rules otherwise, with a warning so the fallback is visible.
+    """
     if report is None:
+        return []
+    try:
+        limits: dict[str, Any] = {
+            "max_drift": _opt_float(env.get("INPUT_MAX_DRIFT")),
+            "max_regressions": _opt_int(env.get("INPUT_MAX_REGRESSIONS")),
+            "max_format_changes": _opt_int(env.get("INPUT_MAX_FORMAT_CHANGES")),
+            "max_flips": _opt_int(env.get("INPUT_MAX_FLIPS")),
+            "fail_on_regression": truthy(env.get("INPUT_FAIL_ON_REGRESSION")),
+        }
+    except ValueError as e:  # the CLI has already rejected the same value
+        warn(f"could not re-check the threshold inputs: {e}")
         return []
     try:
         from promptdrift.thresholds import evaluate_thresholds
     except ImportError:
+        if any(v not in (None, False) for v in limits.values()):
+            warn(f"promptdrift is not importable from {sys.executable}; the threshold "
+                 "inputs are re-checked with the action's built-in copy of the rules. "
+                 "With install: skip, install promptdrift into the Python that "
+                 "python-version selects to get the full report rendering.")
+        return _fallback_thresholds(report, **limits)
+    try:
+        return list(evaluate_thresholds(report, **limits))
+    except ValueError as e:
+        warn(f"could not re-check the threshold inputs: {e}")
         return []
-    return evaluate_thresholds(
-        report,
-        max_drift=_opt_float(env.get("INPUT_MAX_DRIFT")),
-        max_regressions=_opt_int(env.get("INPUT_MAX_REGRESSIONS")),
-        max_format_changes=_opt_int(env.get("INPUT_MAX_FORMAT_CHANGES")),
-        max_flips=_opt_int(env.get("INPUT_MAX_FLIPS")),
-        fail_on_regression=truthy(env.get("INPUT_FAIL_ON_REGRESSION")),
-    )
 
 
 def verdict_status(report: dict) -> str:
@@ -243,6 +304,17 @@ def build_markdown(report: Optional[dict], exit_code: int, failures: list[str],
         md = _minimal_markdown(report, marker, run_url, failures)
     else:
         md = render_markdown(report, artifact_url=run_url, marker=marker, failures=failures)
+    if exit_code != 0 and not failures:
+        # a non-zero exit with no threshold breach found here: an extra-args
+        # threshold, an input error or a crash. Say so above the verdict so the
+        # comment never reads as a clean pass for a failed run.
+        note = (f"> **promptdrift exited with code {exit_code}.** "
+                "See the run log for the reason.")
+        head = (marker or "").strip()
+        if head and md.startswith(head):
+            md = head + "\n\n" + note + md[len(head):]
+        else:
+            md = note + "\n\n" + md
     if artifact_name:
         md = md.rstrip("\n") + f"\n\n<sub>artifact: `{artifact_name}`</sub>\n"
     if len(md) > MAX_COMMENT_CHARS:
@@ -279,22 +351,67 @@ def _next_link(link_header: Optional[str]) -> Optional[str]:
     return None
 
 
+def _starts_with_marker(comment: Mapping[str, Any], marker: str) -> bool:
+    body = comment.get("body")
+    return isinstance(body, str) and body.lstrip().startswith(marker.strip())
+
+
+def token_user_id(api_url: str, token: str,
+                  request: Requester = _urllib_request) -> Optional[int]:
+    """Id of the user the token belongs to (a PAT), or None.
+
+    ``GET /user`` answers 403 for the default ``GITHUB_TOKEN`` and for app
+    installation tokens; their comments are written by a Bot account, which
+    ``find_existing_comment`` recognises without this lookup.
+    """
+    if not token:
+        return None
+    try:
+        _, _, data = request("GET", f"{api_url.rstrip('/')}/user", github_headers(token), None)
+        user = json.loads(data.decode("utf-8") or "{}")
+    except (OSError, ValueError):  # HTTPError and URLError are OSErrors
+        return None
+    uid = user.get("id") if isinstance(user, dict) else None
+    return uid if isinstance(uid, int) else None
+
+
 def find_existing_comment(api_url: str, repo: str, pr_number: int, marker: str, token: str,
                           request: Requester = _urllib_request) -> Optional[dict]:
-    """First issue comment on the PR whose body contains ``marker``, paging via Link."""
+    """The action's own marked comment on the PR, paging via Link, or None.
+
+    A comment qualifies only when its body starts with ``marker`` and it was
+    written by a Bot account (``github-actions[bot]`` or an app) or, failing
+    that, by the user the token belongs to. A marker pasted into someone
+    else's comment is ignored, so a drive-by commenter cannot make the action
+    overwrite their comment or stop it posting the report.
+    """
     url: Optional[str] = (f"{api_url.rstrip('/')}/repos/{repo}/issues/{pr_number}/comments"
                           f"?per_page=100")
     headers = github_headers(token)
     pages = 0
+    others: list[dict] = []
     while url and pages < 50:
         status, resp_headers, data = request("GET", url, headers, None)
         pages += 1
         comments = json.loads(data.decode("utf-8") or "[]")
-        for c in comments:
-            if isinstance(c, dict) and marker in (c.get("body") or ""):
+        for c in comments if isinstance(comments, list) else []:
+            if not (isinstance(c, dict) and _starts_with_marker(c, marker)):
+                continue
+            user = c.get("user")
+            if isinstance(user, dict) and user.get("type") == "Bot":
                 return c
+            others.append(c)
         link = {k.lower(): v for k, v in resp_headers.items()}.get("link")
         url = _next_link(link)
+    if not others:
+        return None
+    me = token_user_id(api_url, token, request)
+    if me is None:
+        return None
+    for c in others:
+        user = c.get("user")
+        if isinstance(user, dict) and user.get("id") == me:
+            return c
     return None
 
 
@@ -302,8 +419,10 @@ def upsert_comment(api_url: str, repo: str, pr_number: int, body: str, marker: s
                    token: str, request: Requester = _urllib_request) -> Optional[int]:
     """PATCH the marked comment if there is one, else POST; returns the comment id.
 
-    A 401, 403 or 404 (typically a fork PR whose token cannot write) is logged
-    as a warning and returns None instead of failing the job.
+    The comment is a best-effort side effect: every failure (HTTP errors such
+    as 401/403/404 on fork PRs, 422, 429 or 5xx, network errors, timeouts, a
+    body that is not JSON) is logged as a warning and returns None instead of
+    failing the job.
     """
     base = api_url.rstrip("/")
     headers = dict(github_headers(token))
@@ -319,18 +438,24 @@ def upsert_comment(api_url: str, repo: str, pr_number: int, body: str, marker: s
             url = f"{base}/repos/{repo}/issues/{pr_number}/comments"
             status, _, data = request("POST", url, headers, payload)
             action = "created"
-    except urllib.error.HTTPError as e:
+        comment = json.loads(data.decode("utf-8") or "{}")
+    except urllib.error.HTTPError as e:  # before URLError: HTTPError subclasses it
         if e.code in (401, 403, 404):
             warn(f"could not post the PR comment (HTTP {e.code}); the token probably "
                  "lacks pull-requests: write, which is expected for pull requests from "
                  "forks. The step summary and artifact still carry the report.")
-            return None
-        raise
+        else:
+            warn(f"could not post the PR comment (HTTP {e.code} {e.reason}); the step "
+                 "summary and artifact still carry the report.")
+        return None
     except urllib.error.URLError as e:
         warn(f"could not reach the GitHub API to post the comment: {e.reason}")
         return None
-    comment = json.loads(data.decode("utf-8") or "{}")
-    cid = comment.get("id")
+    except (OSError, ValueError) as e:  # read timeouts, a body that is not JSON
+        warn(f"could not post the PR comment ({type(e).__name__}: {e}); the step "
+             "summary and artifact still carry the report.")
+        return None
+    cid = comment.get("id") if isinstance(comment, dict) else None
     log(f"{action} PR comment {cid} on {repo}#{pr_number} (HTTP {status})")
     return cid
 
@@ -384,6 +509,12 @@ def main(argv: Optional[list[str]] = None, env: Optional[Mapping[str, str]] = No
     if truthy(env.get("INPUT_STEP_SUMMARY", "true")):
         write_step_summary(markdown, env.get("GITHUB_STEP_SUMMARY"))
 
+    # Outputs and error annotations go out before the comment, so nothing the
+    # GitHub API does can leave the caller without them.
+    write_github_output(outputs, env.get("GITHUB_OUTPUT"))
+    for line in failures:
+        print(f"::error::promptdrift: {line}")
+
     if truthy(env.get("INPUT_COMMENT", "true")):
         pr = pr_number_from_event(env.get("GITHUB_EVENT_PATH"))
         token = env.get("INPUT_GITHUB_TOKEN") or env.get("GITHUB_TOKEN") or ""
@@ -397,11 +528,12 @@ def main(argv: Optional[list[str]] = None, env: Optional[Mapping[str, str]] = No
         else:
             api = env.get("GITHUB_API_URL") or "https://api.github.com"
             cid = upsert_comment(api, repo, pr, markdown, marker, token, request)
-            outputs["comment-id"] = "" if cid is None else str(cid)
+            if cid is not None:
+                outputs["comment-id"] = str(cid)
+                # appended: for a repeated key the last line wins
+                write_github_output({"comment-id": outputs["comment-id"]},
+                                    env.get("GITHUB_OUTPUT"))
 
-    write_github_output(outputs, env.get("GITHUB_OUTPUT"))
-    for line in failures:
-        print(f"::error::promptdrift: {line}")
     log(f"verdict {outputs['verdict']}, exit code {args.exit_code}, "
         f"{len(failures)} threshold failure(s)")
     return 0

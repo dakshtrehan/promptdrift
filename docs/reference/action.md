@@ -22,7 +22,7 @@ jobs:
   drift:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dakshtrehan/promptdrift@main
         id: drift
@@ -66,7 +66,7 @@ All inputs are strings. An empty threshold input disables that gate.
 | `cases` | `""` | Test cases file (live mode) |
 | `checks` | `""` | Default deterministic checks file (JSON or YAML) for cases without their own |
 | `samples` | `"1"` | Samples per side per case in live mode; more than 1 reports a noise floor |
-| `judge` | `"false"` | Run the LLM judge. Offline mode never calls a model unless this is `"true"`; live mode passes `--no-judge` when it is `"false"` |
+| `judge` | `"false"` | Run the LLM judge. `"true"`, `"yes"`, `"on"` or `"1"` (any case) turn it on; any other value, including the default `"false"`, keeps it off: offline mode then calls no model and live mode passes `--no-judge` |
 | `judge-provider` | `""` | `openai`, `anthropic` or `ollama` (default from the environment) |
 | `judge-model` | `""` | Judge model name (default depends on the provider) |
 | `similarity` | `"tfidf"` | `tfidf` or `embedding` (live mode) |
@@ -74,11 +74,11 @@ All inputs are strings. An empty threshold input disables that gate.
 | `max-regressions` | `""` | Fail when more than this many cases regressed |
 | `max-format-changes` | `""` | Fail when more than this many cases changed output format |
 | `max-flips` | `""` | Fail when more than this many checks flipped from pass to fail |
-| `fail-on-regression` | `"true"` | Fail the job when any case regressed |
+| `fail-on-regression` | `"true"` | Fail the job when any case regressed. Accepts `true`, `yes`, `on` or `1` in any case; anything else is off |
 | `comment` | `"true"` | Post or update one PR comment |
-| `comment-marker` | `<!-- promptdrift-report -->` | Hidden marker used to find the action's own comment. Change it to post separate comments from two jobs |
+| `comment-marker` | `<!-- promptdrift-report -->` | Hidden marker used to find the action's own comment. Change it to post separate comments from two jobs (and change `artifact-name` too). Only a comment that starts with the marker and was written by a Bot account or by the token's own user is updated |
 | `step-summary` | `"true"` | Write the Markdown to the job summary |
-| `artifact-name` | `"promptdrift-report"` | Name of the uploaded artifact |
+| `artifact-name` | `"promptdrift-report"` | Name of the uploaded artifact. Must be unique within a workflow run: in a matrix or a second job set it per job, for example `promptdrift-report-${{ matrix.python-version }}`, or the second upload fails |
 | `upload-artifact` | `"true"` | Upload the report directory |
 | `report-dir` | `"promptdrift-report"` | Directory (relative to `working-directory`) for `report.json`, `report.html`, `report.junit.xml`, `report.csv` and, on a breach, `threshold-failures.txt` |
 | `python-version` | `"3.12"` | Python version for `actions/setup-python` |
@@ -116,7 +116,9 @@ permissions:
 `pull-requests: write` is only needed for the comment. On pull requests from
 forks the default token is read only: the action logs a warning, skips the
 comment, and still writes the job summary and the artifact; the job outcome
-is unaffected. On `push`, `schedule` and `workflow_dispatch` there is no pull
+is unaffected. Any other GitHub API failure while posting the comment (a 5xx,
+a 429 rate limit, a timeout) is also only a warning, and every output is still
+set. On `push`, `schedule` and `workflow_dispatch` there is no pull
 request number, so the comment is skipped with a notice.
 
 ## What the comment contains
@@ -138,14 +140,25 @@ identical for identical reports, so re-runs do not churn the comment history.
 1. `actions/setup-python` with `python-version`.
 2. Install promptdrift per `install`, then `promptdrift --version`.
 3. Run `promptdrift diff` or `promptdrift compare` with the mapped flags and
-   `--output`, `--html`, `--junit`, `--csv` into `report-dir`. This step never
-   fails by itself; the exit code is captured.
+   `--output`, `--html`, `--junit`, `--csv` into `report-dir`. Report files
+   already in `report-dir` (from an earlier run or committed to the branch)
+   are deleted first, so they can never be shown as this run's report. The
+   promptdrift exit code is captured rather than failing the step.
 4. `action/summarize.py` (standard library only) re-evaluates the thresholds
-   from `report.json`, renders the Markdown, upserts the comment through the
-   REST API, writes the job summary and sets the outputs.
-5. `actions/upload-artifact` of `report-dir` (`if: always()`).
+   from `report.json` (with a built-in copy of the rules and a warning when
+   promptdrift is not importable from that Python), renders the Markdown,
+   writes the job summary, sets the outputs and then upserts the comment
+   through the REST API. A comment failure is only a warning.
+5. `actions/upload-artifact` of `report-dir` (`if: always()`, skipped when
+   the run step never got as far as creating `report-dir`).
 6. Fail on thresholds: exits with promptdrift's code after printing
-   `threshold-failures.txt`.
+   `threshold-failures.txt`, or says that promptdrift did not run when the
+   install or run step failed first.
+
+The `uses:` steps target Node.js 24 (`actions/setup-python@v6`,
+`actions/upload-artifact@v6`), which needs GitHub Actions runner 2.327.1 or
+newer; GitHub-hosted runners qualify, old self-hosted runners must be
+updated.
 
 ## Testing the action locally
 

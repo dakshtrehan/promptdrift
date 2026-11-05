@@ -28,7 +28,7 @@ jobs:
   drift:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dakshtrehan/promptdrift@main
         with:
           outputs: prompts/outputs.jsonl
@@ -74,7 +74,7 @@ All inputs are strings. Unset threshold inputs disable that gate.
 | `cases` | `""` | Test cases file (live mode). |
 | `checks` | `""` | Default deterministic checks file (JSON/YAML). |
 | `samples` | `"1"` | Samples per side per case in live mode. |
-| `judge` | `"false"` | Run the LLM judge. Offline mode never calls a model unless this is `"true"`; live mode passes `--no-judge` when it is `"false"`. |
+| `judge` | `"false"` | Run the LLM judge. `"true"`, `"yes"`, `"on"` or `"1"` (any case) turn it on; any other value, including the default `"false"`, keeps it off: offline mode then calls no model and live mode passes `--no-judge`. |
 | `judge-provider` | `""` | `openai`, `anthropic` or `ollama`. |
 | `judge-model` | `""` | Judge model name. |
 | `similarity` | `"tfidf"` | `tfidf` or `embedding` (live mode). |
@@ -82,11 +82,11 @@ All inputs are strings. Unset threshold inputs disable that gate.
 | `max-regressions` | `""` | Fail when more than this many cases regressed. |
 | `max-format-changes` | `""` | Fail when more than this many cases changed output format. |
 | `max-flips` | `""` | Fail when more than this many checks flipped from pass to fail. |
-| `fail-on-regression` | `"true"` | Fail the job when any case regressed. |
+| `fail-on-regression` | `"true"` | Fail the job when any case regressed. Accepts `true`, `yes`, `on` or `1` in any case; anything else is off. |
 | `comment` | `"true"` | Post or update one PR comment. |
-| `comment-marker` | `<!-- promptdrift-report -->` | Hidden marker used to find the action's own comment. Change it to post separate comments from two jobs. |
+| `comment-marker` | `<!-- promptdrift-report -->` | Hidden marker used to find the action's own comment. Change it to post separate comments from two jobs (and change `artifact-name` too). Only a comment that starts with the marker and was written by a Bot account or by the token's own user is updated, so a marker pasted into someone else's comment is ignored. |
 | `step-summary` | `"true"` | Write the Markdown to the job summary. |
-| `artifact-name` | `"promptdrift-report"` | Name of the uploaded artifact. |
+| `artifact-name` | `"promptdrift-report"` | Name of the uploaded artifact. Must be unique within a workflow run: in a matrix or a second job set it per job, for example `promptdrift-report-${{ matrix.python-version }}`, or the second upload fails. |
 | `upload-artifact` | `"true"` | Upload the report directory. |
 | `report-dir` | `"promptdrift-report"` | Directory (relative to `working-directory`) for `report.json`, `report.html`, `report.junit.xml`, `report.csv` and, on a breach, `threshold-failures.txt`. |
 | `python-version` | `"3.12"` | Python for `actions/setup-python`. |
@@ -121,12 +121,21 @@ permissions:
 `pull-requests: write` is only needed for the comment. On pull requests from
 forks the default token is read only; the action then logs a warning, skips
 the comment and still writes the job summary and the artifact. The job
-outcome is unaffected. If you need comments on fork PRs, run the action from
+outcome is unaffected. The same holds for any other GitHub API failure while
+posting the comment (a 5xx, a 429 rate limit, a timeout): it is logged as a
+warning and every output is still set. If you need comments on fork PRs, run the action from
 a `pull_request_target` workflow that checks out the base branch, and never
 run untrusted code there.
 
 On `push`, `schedule` or `workflow_dispatch` events there is no pull request
 number, so the comment step prints a notice and is skipped.
+
+## Runner requirement
+
+The action's `uses:` steps (`actions/setup-python@v6`,
+`actions/upload-artifact@v6`) run on Node.js 24, which needs GitHub Actions
+runner 2.327.1 or newer. GitHub-hosted runners qualify; update old
+self-hosted runners before using the action.
 
 ## What the comment contains
 

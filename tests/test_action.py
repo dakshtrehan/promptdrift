@@ -9,8 +9,9 @@ skipped. No network, no API keys, no model calls.
 Limits of the substitution (kept deliberately small): it understands
 ``${{ inputs.x }}``, ``${{ github.action_path }}``, ``${{ github.token }}`` and
 ``${{ steps.x.outputs.y }}``; ``if:`` conditions run the step when they contain
-``always()`` and otherwise only while no earlier step has failed. Any other
-expression raises so a change to action.yml that needs more is noticed.
+``always()`` (plus any ``inputs.x == 'v'`` and ``steps.x.outputs.y != ''``
+clauses joined by ``&&``) and otherwise only while no earlier step has failed.
+Any other expression raises so a change to action.yml that needs more is noticed.
 """
 from __future__ import annotations
 
@@ -39,6 +40,7 @@ OFFLINE_CHECKS = ROOT / "examples" / "offline" / "checks.yaml"
 MARKER = "<!-- promptdrift-report -->"
 REPO = "octo/prompts"
 PR = 7
+BOT = {"login": "github-actions[bot]", "id": 41898282, "type": "Bot"}
 
 spec = importlib.util.spec_from_file_location("summarize", ROOT / "action" / "summarize.py")
 summarize = importlib.util.module_from_spec(spec)
@@ -183,10 +185,16 @@ class Runner:
         cond = str(cond)
         if "always()" in cond:
             rest = EXPR.sub(lambda m: m.group(1), cond).replace("always()", "").strip(" &")
-            if rest:
-                m = re.fullmatch(r"inputs\.([\w-]+)\s*==\s*'([^']*)'", rest)
+            for clause in filter(None, (c.strip() for c in rest.split("&&"))):
+                m = re.fullmatch(r"inputs\.([\w-]+)\s*==\s*'([^']*)'", clause)
+                if m:
+                    if self.inputs[m.group(1)] != m.group(2):
+                        return False
+                    continue
+                m = re.fullmatch(r"steps\.([\w-]+)\.outputs\.([\w-]+)\s*!=\s*''", clause)
                 assert m, f"unsupported if condition: {cond}"
-                return self.inputs[m.group(1)] == m.group(2)
+                if not self.steps.get(m.group(1), {}).get(m.group(2), ""):
+                    return False
             return True
         raise AssertionError(f"unsupported if condition: {cond}")
 
@@ -325,7 +333,8 @@ def test_example_workflow_is_valid_and_informational():
 # ── Full mocked runs ──────────────────────────────────────────────────────────
 def test_run_updates_existing_comment_and_passes(workspace, api):
     ws, env, _ = workspace
-    api.pages = [[{"id": 11, "body": "unrelated"}, {"id": 42, "body": f"{MARKER}\nold"}]]
+    api.pages = [[{"id": 11, "body": "unrelated"},
+                  {"id": 42, "body": f"{MARKER}\nold", "user": BOT}]]
     r = Runner(ws, offline_inputs(**{"fail-on-regression": "false", "max-drift": "0.9"}),
                env).run()
     assert [(s, rc) for s, _, rc in r.log] == [
@@ -580,14 +589,24 @@ def test_next_link_parsing():
 class FakeRequest:
     """Scripted ``request(method, url, headers, body)`` for the REST helpers."""
 
-    def __init__(self, pages, post_error=None, post_id=5):
+    def __init__(self, pages, post_error=None, post_id=5, user=None, get_error=None,
+                 post_body=None):
         self.pages = pages
         self.post_error = post_error
         self.post_id = post_id
+        self.user = user          # GET /user answer; None means HTTP 403 (GITHUB_TOKEN)
+        self.get_error = get_error
+        self.post_body = post_body
         self.calls = []
 
     def __call__(self, method, url, headers, body):
         self.calls.append((method, url, dict(headers), body))
+        if method == "GET" and urlparse(url).path.endswith("/user"):
+            if self.user is None:
+                raise http_error(403)
+            return 200, {}, json.dumps(self.user).encode()
+        if method == "GET" and self.get_error is not None:
+            raise self.get_error
         if method == "GET":
             page = int(parse_qs(urlparse(url).query).get("page", ["1"])[0])
             headers_out = {}
@@ -596,6 +615,8 @@ class FakeRequest:
             return 200, headers_out, json.dumps(self.pages[page - 1]).encode()
         if self.post_error is not None:
             raise self.post_error
+        if self.post_body is not None:
+            return 201, {}, self.post_body
         return 201 if method == "POST" else 200, {}, json.dumps({"id": self.post_id}).encode()
 
 
@@ -604,7 +625,8 @@ def http_error(code):
 
 
 def test_find_existing_comment_pages_until_marker():
-    req = FakeRequest([[{"id": 1, "body": "a"}], [{"id": 2, "body": None}, {"id": 3, "body": MARKER}]])
+    req = FakeRequest([[{"id": 1, "body": "a"}],
+                       [{"id": 2, "body": None}, {"id": 3, "body": MARKER, "user": BOT}]])
     found = summarize.find_existing_comment("https://api/", REPO, PR, MARKER, "tok", req)
     assert found["id"] == 3 and len(req.calls) == 2
     assert req.calls[0][1] == f"https://api/repos/{REPO}/issues/{PR}/comments?per_page=100"
@@ -616,7 +638,7 @@ def test_find_existing_comment_pages_until_marker():
 
 
 def test_upsert_comment_paths():
-    req = FakeRequest([[{"id": 3, "body": MARKER}]], post_id=3)
+    req = FakeRequest([[{"id": 3, "body": MARKER, "user": BOT}]], post_id=3)
     assert summarize.upsert_comment("https://api", REPO, PR, "body", MARKER, "t", req) == 3
     assert req.calls[-1][0] == "PATCH" and req.calls[-1][1].endswith("/issues/comments/3")
     assert json.loads(req.calls[-1][3]) == {"body": "body"}
@@ -628,9 +650,52 @@ def test_upsert_comment_paths():
         assert summarize.upsert_comment("https://api", REPO, PR, "b", MARKER, "t", req) is None
     req = FakeRequest([[]], post_error=urllib.error.URLError("down"))
     assert summarize.upsert_comment("https://api", REPO, PR, "b", MARKER, "t", req) is None
-    req = FakeRequest([[]], post_error=http_error(500))
-    with pytest.raises(urllib.error.HTTPError):
-        summarize.upsert_comment("https://api", REPO, PR, "b", MARKER, "t", req)
+    # any other failure is a warning too: the comment is best effort
+    for err in (http_error(422), http_error(429), http_error(500), http_error(502),
+                TimeoutError("read timed out"), OSError("reset")):
+        req = FakeRequest([[]], post_error=err)
+        assert summarize.upsert_comment("https://api", REPO, PR, "b", MARKER, "t", req) is None
+    req = FakeRequest([[]], get_error=http_error(500))
+    assert summarize.upsert_comment("https://api", REPO, PR, "b", MARKER, "t", req) is None
+    req = FakeRequest([[]], post_body=b"<html>proxy error</html>")
+    assert summarize.upsert_comment("https://api", REPO, PR, "b", MARKER, "t", req) is None
+    req = FakeRequest([[]], post_body=b"[]")
+    assert summarize.upsert_comment("https://api", REPO, PR, "b", MARKER, "t", req) is None
+
+
+def test_upsert_comment_http_errors_warn(capsys):
+    req = FakeRequest([[]], post_error=http_error(429))
+    assert summarize.upsert_comment("https://api", REPO, PR, "b", MARKER, "t", req) is None
+    out = capsys.readouterr().out
+    assert "::warning::" in out and "HTTP 429" in out and "fork" not in out
+    req = FakeRequest([[]], post_error=http_error(403))
+    summarize.upsert_comment("https://api", REPO, PR, "b", MARKER, "t", req)
+    assert "fork" in capsys.readouterr().out
+
+
+def test_find_existing_comment_ignores_marker_in_other_users_comments():
+    drive_by = {"id": 900, "body": f"{MARKER} haha", "user": {"id": 1, "type": "User"}}
+    quoted = {"id": 901, "body": f"look: {MARKER}", "user": BOT}  # marker not first
+    ours = {"id": 42, "body": f"\n{MARKER}\nreport", "user": BOT}
+    req = FakeRequest([[drive_by, quoted], [ours]])
+    assert summarize.find_existing_comment("https://api", REPO, PR, MARKER, "t", req)["id"] == 42
+    assert not any(c[1].endswith("/user") for c in req.calls)  # a Bot match needs no lookup
+    # only a drive-by marker comment, default GITHUB_TOKEN (GET /user is 403): POST a new one
+    req = FakeRequest([[drive_by]], post_id=77)
+    assert summarize.upsert_comment("https://api", REPO, PR, "b", MARKER, "t", req) == 77
+    assert [c[0] for c in req.calls] == ["GET", "GET", "POST"]
+    # a PAT: the token user's own marked comment is updated, other users' are not
+    mine = {"id": 55, "body": MARKER, "user": {"id": 7, "type": "User"}}
+    req = FakeRequest([[drive_by, mine]], user={"id": 7, "login": "me"})
+    assert summarize.find_existing_comment("https://api", REPO, PR, MARKER, "t", req)["id"] == 55
+    req = FakeRequest([[drive_by]], user={"id": 7, "login": "me"})
+    assert summarize.find_existing_comment("https://api", REPO, PR, MARKER, "t", req) is None
+    assert summarize.token_user_id("https://api", "", req) is None
+    req = FakeRequest([[]], user=["not", "a", "user"])
+    assert summarize.token_user_id("https://api", "t", req) is None
+    # a page that is not a list is skipped
+    req = FakeRequest([{"message": "odd"}])
+    assert summarize.find_existing_comment("https://api", REPO, PR, MARKER, "t", req) is None
 
 
 def test_pr_number_from_event(tmp_path):
@@ -683,7 +748,7 @@ def test_main_with_fake_request_and_env(tmp_path, capsys):
            "GITHUB_STEP_SUMMARY": str(tmp_path / "sum.md"), "GITHUB_EVENT_PATH": str(event),
            "GITHUB_REPOSITORY": "o/r", "GITHUB_RUN_ID": "5", "GITHUB_API_URL": "https://api",
            "INPUT_MAX_DRIFT": "0.1", "INPUT_GITHUB_TOKEN": "t", "INPUT_COMMENT_MARKER": "<!-- m -->"}
-    req = FakeRequest([[{"id": 21, "body": "<!-- m --> old"}]], post_id=21)
+    req = FakeRequest([[{"id": 21, "body": "<!-- m --> old", "user": BOT}]], post_id=21)
     assert summarize.main(["--report-dir", str(report_dir), "--exit-code", "1"], env, req) == 0
     out = parse_outputs((tmp_path / "out.txt").read_text())
     assert out["verdict"] == "fail" and out["threshold-failures"] == "1" and out["comment-id"] == "21"
@@ -715,3 +780,173 @@ def test_main_reads_defaults_from_environment(tmp_path, monkeypatch):
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     assert summarize.main([]) == 0
     assert parse_outputs((tmp_path / "o.txt").read_text())["verdict"] == "fail"  # no report
+
+
+# ── review fixes ──────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("code", [422, 429, 500, 502])
+def test_main_sets_outputs_when_the_comment_api_fails(tmp_path, capsys, code):
+    report_dir = tmp_path / "rep"
+    report_dir.mkdir()
+    (report_dir / "report.json").write_text(json.dumps(
+        {"summary": {"avg_drift": 0.01, "regressions": 0, "improvements": 0}}))
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"pull_request": {"number": 3}}))
+    env = {"GITHUB_OUTPUT": str(tmp_path / "out.txt"), "GITHUB_EVENT_PATH": str(event),
+           "GITHUB_REPOSITORY": "o/r", "GITHUB_API_URL": "https://api",
+           "INPUT_GITHUB_TOKEN": "t", "INPUT_STEP_SUMMARY": "false", "INPUT_MAX_DRIFT": "0.001"}
+    req = FakeRequest([[]], post_error=http_error(code))
+    assert summarize.main(["--report-dir", str(report_dir), "--exit-code", "1"], env, req) == 0
+    out = parse_outputs((tmp_path / "out.txt").read_text())
+    assert out["verdict"] == "fail" and out["avg-drift"] == "0.01" and out["comment-id"] == ""
+    assert out["threshold-failures"] == "1"
+    printed = capsys.readouterr().out
+    assert f"HTTP {code}" in printed and "::error::promptdrift: avg drift" in printed
+
+
+def test_main_appends_comment_id_after_the_outputs(tmp_path):
+    report_dir = tmp_path / "rep"
+    report_dir.mkdir()
+    (report_dir / "report.json").write_text(json.dumps({"summary": {"avg_drift": 0.01}}))
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"pull_request": {"number": 3}}))
+    env = {"GITHUB_OUTPUT": str(tmp_path / "out.txt"), "GITHUB_EVENT_PATH": str(event),
+           "GITHUB_REPOSITORY": "o/r", "GITHUB_API_URL": "https://api",
+           "INPUT_GITHUB_TOKEN": "t", "INPUT_STEP_SUMMARY": "false"}
+    summarize.main(["--report-dir", str(report_dir)], env, FakeRequest([[]], post_id=31))
+    text = (tmp_path / "out.txt").read_text()
+    assert text.index("verdict=") < text.rindex("comment-id=31")
+    assert parse_outputs(text)["comment-id"] == "31"
+
+
+FALLBACK_REPORTS = [
+    {"summary": {"avg_drift": 0.3, "regressions": 1, "structural": {"format_changes": 2},
+                 "checks": {"pass_to_fail": 1}}},
+    {"summary": {"avg_drift": 0.1004, "regressions": 0}},
+    {"summary": {"avg_drift": 0.05, "regressions": 3, "structural": {"format_changes": 0},
+                 "checks": {"pass_to_fail": 4}}},
+    {"summary": {}},
+]
+FALLBACK_LIMITS = [
+    {"INPUT_MAX_DRIFT": "0.1", "INPUT_MAX_REGRESSIONS": "0", "INPUT_MAX_FORMAT_CHANGES": "1",
+     "INPUT_MAX_FLIPS": "0", "INPUT_FAIL_ON_REGRESSION": "true"},
+    {"INPUT_MAX_DRIFT": "0.0", "INPUT_MAX_REGRESSIONS": "5", "INPUT_FAIL_ON_REGRESSION": "false"},
+    {},
+]
+
+
+def test_threshold_fallback_matches_the_library(monkeypatch, capsys):
+    with_lib = [summarize.threshold_failures(r, e) for r in FALLBACK_REPORTS
+                for e in FALLBACK_LIMITS]
+    assert any(with_lib)
+    assert capsys.readouterr().out == ""  # no warning while promptdrift is importable
+    monkeypatch.setitem(sys.modules, "promptdrift.thresholds", None)
+    without = [summarize.threshold_failures(r, e) for r in FALLBACK_REPORTS
+               for e in FALLBACK_LIMITS]
+    assert without == with_lib
+    printed = capsys.readouterr().out
+    assert "::warning::" in printed and "not importable" in printed
+    summarize.threshold_failures({"summary": {}}, {})  # no limits set: no warning
+    assert capsys.readouterr().out == ""
+
+
+def test_threshold_inputs_that_do_not_parse_are_a_warning(capsys):
+    assert summarize.threshold_failures({"summary": {}}, {"INPUT_MAX_FLIPS": "two"}) == []
+    assert "could not re-check" in capsys.readouterr().out
+
+
+def test_markdown_says_when_promptdrift_failed_without_a_threshold_breach():
+    rep = {"summary": {"avg_drift": 0.01}}
+    md = summarize.build_markdown(rep, 1, [], MARKER, None)
+    assert md.startswith(MARKER)
+    assert "promptdrift exited with code 1" in md.split("##", 1)[0]
+    assert "exited with code" not in summarize.build_markdown(rep, 1, ["breach"], MARKER, None)
+    assert "exited with code" not in summarize.build_markdown(rep, 0, [], MARKER, None)
+    assert summarize.build_markdown(rep, 2, [], None, None).startswith(
+        "> **promptdrift exited with code 2.**")
+
+
+def test_stale_report_files_are_cleared_before_the_run(workspace, api):
+    ws, env, _ = workspace
+    stale = ws / "promptdrift-report"
+    stale.mkdir()
+    (stale / "report.json").write_text(json.dumps({"summary": {"avg_drift": 0.0}}))
+    for name in ("report.html", "report.junit.xml", "report.csv", "threshold-failures.txt"):
+        (stale / name).write_text("planted")
+    (stale / "keep.txt").write_text("not ours")
+    (ws / "data" / "outputs.jsonl").write_text('{"case_id": "x", "output_a": "a"}\n')
+    r = Runner(ws, offline_inputs(), env).run()
+    assert r.steps["run"]["exit-code"] != "0"
+    assert sorted(p.name for p in stale.iterdir()) == ["keep.txt"]
+    out = r.steps["summarize"]
+    assert out["report-json"] == "" and out["verdict"] == "fail"
+    body = api.requests[-1]["body"]["body"]
+    assert "produced no report.json" in body and "SAFE TO SHIP" not in body
+    assert "threshold failures:" not in r.steps["Fail on thresholds"]["_stdout"]
+
+
+def test_failed_run_step_skips_upload_and_says_promptdrift_did_not_run(workspace, api):
+    ws, env, _ = workspace
+    r = Runner(ws, offline_inputs(**{"working-directory": "does-not-exist"}), env).run()
+    assert ("run", "run", 1) in r.log
+    assert ("summarize", "skipped", -1) in r.log
+    assert ("Upload report artifact", "skipped", -1) in r.log
+    final = r.steps["Fail on thresholds"]
+    assert r.log[-1] == ("Fail on thresholds", "run", 1)
+    assert "::error::promptdrift did not run" in final["_stdout"]
+    assert "exited with code" not in final["_stdout"]
+
+
+def test_live_mode_without_cases_is_a_configuration_error(workspace, api):
+    ws, env, _ = workspace
+    r = Runner(ws, {"install": "skip", "config-a": "a.yaml", "config-b": "b.yaml",
+                    "comment": "false"}, env).run()
+    assert r.steps["run"]["exit-code"] == "2"
+    assert "::error::promptdrift: set 'outputs'" in r.steps["run"]["_stdout"]
+    assert "'cases'" in r.steps["run"]["_stdout"]
+    assert "Is a directory" not in r.steps["run"]["_stderr"]
+    assert r.log[-1][2] == 2
+
+
+def _fake_promptdrift(tmp_path, env):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    fake = bin_dir / "promptdrift"
+    fake.write_text("#!/usr/bin/env python3\n"
+                    "import json, sys, os\n"
+                    "if sys.argv[1:] == ['--version']:\n"
+                    "    sys.exit(0)\n"
+                    "open(os.environ['FAKE_ARGV'], 'w').write(json.dumps(sys.argv[1:]))\n"
+                    "sys.exit(0)\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env["FAKE_ARGV"] = str(tmp_path / "argv.json")
+    return tmp_path / "argv.json"
+
+
+@pytest.mark.parametrize("value,on", [("true", True), ("True", True), ("YES", True),
+                                      ("on", True), ("1", True), ("false", False),
+                                      ("no", False), ("", False)])
+def test_boolean_inputs_accept_the_same_spellings_as_summarize(workspace, api, tmp_path,
+                                                                value, on):
+    ws, env, _ = workspace
+    argv_file = _fake_promptdrift(tmp_path, env)
+    Runner(ws, {"install": "skip", "config-a": "a", "config-b": "b", "cases": "c",
+                "judge": value, "fail-on-regression": value, "comment": "false"}, env).run()
+    argv = json.loads(argv_file.read_text())
+    assert ("--no-judge" not in argv) is on
+    assert ("--fail-on-regression" in argv) is on
+    assert summarize.truthy(value) is on
+    Runner(ws, {"install": "skip", "outputs": "data/outputs.jsonl", "judge": value,
+                "comment": "false"}, env).run()
+    assert ("--judge" in json.loads(argv_file.read_text())) is on
+
+
+def test_action_pins_node24_majors():
+    text = ACTION_YML.read_text(encoding="utf-8")
+    assert "actions/setup-python@v6" in text and "actions/upload-artifact@v6" in text
+    for wf in (ROOT / ".github" / "workflows").glob("*.yml"):
+        body = wf.read_text(encoding="utf-8")
+        for old in ("actions/checkout@v4", "actions/setup-python@v5",
+                    "actions/upload-artifact@v4", "actions/configure-pages@v5",
+                    "actions/upload-pages-artifact@v3", "actions/deploy-pages@v4"):
+            assert old not in body, f"{wf.name} still pins {old}"

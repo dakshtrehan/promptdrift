@@ -40,8 +40,9 @@ inputs:
     default: "1"
   judge:
     description: >-
-      Run the LLM judge ("true" or "false"). Off by default: offline mode never
-      calls a model unless this is true, and live mode passes --no-judge.
+      Run the LLM judge. "true", "yes", "on" or "1" (any case) turn it on;
+      anything else, including the default "false", keeps it off: offline mode
+      then calls no model and live mode passes --no-judge.
     required: false
     default: "false"
   judge-provider:
@@ -73,7 +74,7 @@ inputs:
     required: false
     default: ""
   fail-on-regression:
-    description: "Fail the job when any case regressed."
+    description: "Fail the job when any case regressed (\"true\", \"yes\", \"on\" or \"1\", any case)."
     required: false
     default: "true"
   comment:
@@ -89,7 +90,10 @@ inputs:
     required: false
     default: "true"
   artifact-name:
-    description: "Name of the uploaded artifact holding the report files."
+    description: >-
+      Name of the uploaded artifact holding the report files. Must be unique
+      within a workflow run: set it per job when the action runs in a matrix or
+      in more than one job.
     required: false
     default: "promptdrift-report"
   upload-artifact:
@@ -171,7 +175,7 @@ runs:
   using: "composite"
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ inputs.python-version }}
 
@@ -186,7 +190,12 @@ runs:
         case "$INSTALL" in
           action) python -m pip install --quiet "$ACTION_PATH" ;;
           pypi)   python -m pip install --quiet promptdrift ;;
-          skip)   echo "install: skip (promptdrift must already be on PATH)" ;;
+          skip)
+            echo "install: skip (promptdrift must already be on PATH)"
+            if ! python -c "import promptdrift" 2>/dev/null; then
+              echo "::warning::promptdrift: not importable from $(command -v python); the summary step falls back to its built-in report and threshold rendering"
+            fi
+            ;;
           *)      echo "::error::promptdrift: unknown install mode '$INSTALL' (use action, pypi or skip)"; exit 1 ;;
         esac
         promptdrift --version
@@ -220,16 +229,29 @@ runs:
         cd "$INPUT_WORKING_DIRECTORY"
         mkdir -p "$INPUT_REPORT_DIR"
         report_dir="$(cd "$INPUT_REPORT_DIR" && pwd)"
+        # Files left from an earlier run or committed to the branch must never
+        # be shown as this run's report, so clear them before promptdrift runs.
+        rm -f "$report_dir/report.json" "$report_dir/report.html" "$report_dir/report.junit.xml" \
+          "$report_dir/report.csv" "$report_dir/threshold-failures.txt"
         echo "report-dir=$report_dir" >> "$GITHUB_OUTPUT"
+
+        # Boolean inputs accept true, yes, on or 1 in any case, like summarize.py.
+        # tr instead of ${var,,} keeps this working on bash 3.2 (macOS runners).
+        is_true() {
+          case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+            1|true|yes|on) return 0 ;;
+            *) return 1 ;;
+          esac
+        }
 
         args=()
         if [ -n "$INPUT_OUTPUTS" ]; then
           args+=(diff "$INPUT_OUTPUTS")
-          if [ "$INPUT_JUDGE" = "true" ]; then args+=(--judge); fi
-        elif [ -n "$INPUT_CONFIG_A" ] && [ -n "$INPUT_CONFIG_B" ]; then
+          if is_true "$INPUT_JUDGE"; then args+=(--judge); fi
+        elif [ -n "$INPUT_CONFIG_A" ] && [ -n "$INPUT_CONFIG_B" ] && [ -n "$INPUT_CASES" ]; then
           args+=(compare "$INPUT_CONFIG_A" "$INPUT_CONFIG_B" --cases "$INPUT_CASES")
           args+=(--similarity "$INPUT_SIMILARITY" --samples "$INPUT_SAMPLES")
-          if [ "$INPUT_JUDGE" != "true" ]; then args+=(--no-judge); fi
+          if ! is_true "$INPUT_JUDGE"; then args+=(--no-judge); fi
         else
           echo "::error::promptdrift: set 'outputs' (offline) or 'config-a', 'config-b' and 'cases' (live)"
           echo "exit-code=2" >> "$GITHUB_OUTPUT"
@@ -242,7 +264,7 @@ runs:
         if [ -n "$INPUT_MAX_REGRESSIONS" ]; then args+=(--max-regressions "$INPUT_MAX_REGRESSIONS"); fi
         if [ -n "$INPUT_MAX_FORMAT_CHANGES" ]; then args+=(--max-format-changes "$INPUT_MAX_FORMAT_CHANGES"); fi
         if [ -n "$INPUT_MAX_FLIPS" ]; then args+=(--max-flips "$INPUT_MAX_FLIPS"); fi
-        if [ "$INPUT_FAIL_ON_REGRESSION" = "true" ]; then args+=(--fail-on-regression); fi
+        if is_true "$INPUT_FAIL_ON_REGRESSION"; then args+=(--fail-on-regression); fi
         args+=(--output "$report_dir/report.json" --html "$report_dir/report.html")
         args+=(--junit "$report_dir/report.junit.xml" --csv "$report_dir/report.csv")
         if [ -n "$INPUT_EXTRA_ARGS" ]; then
@@ -277,8 +299,8 @@ runs:
       run: python "${{ github.action_path }}/action/summarize.py"
 
     - name: Upload report artifact
-      if: ${{ always() && inputs.upload-artifact == 'true' }}
-      uses: actions/upload-artifact@v4
+      if: ${{ always() && inputs.upload-artifact == 'true' && steps.run.outputs.report-dir != '' }}
+      uses: actions/upload-artifact@v6
       with:
         name: ${{ inputs.artifact-name }}
         path: ${{ steps.run.outputs.report-dir }}
@@ -291,7 +313,11 @@ runs:
         PROMPTDRIFT_EXIT_CODE: ${{ steps.run.outputs.exit-code }}
         REPORT_DIR: ${{ steps.run.outputs.report-dir }}
       run: |
-        rc="${PROMPTDRIFT_EXIT_CODE:-1}"
+        if [ -z "${PROMPTDRIFT_EXIT_CODE:-}" ]; then
+          echo "::error::promptdrift did not run (see the install or run step above for the cause)"
+          exit 1
+        fi
+        rc="$PROMPTDRIFT_EXIT_CODE"
         if [ "$rc" != "0" ]; then
           echo "promptdrift exited with code $rc"
           if [ -f "$REPORT_DIR/threshold-failures.txt" ]; then
