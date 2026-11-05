@@ -52,7 +52,52 @@ def test_esc_code_handles_backticks_newlines_and_limits():
     assert esc_code("x" * 300, limit=10) == "`xxxxxxx...`"
     assert esc_code("a|b", in_table=True) == "`a\\|b`"
     assert esc_code("a|b") == "`a|b`"
-    assert esc_code("<i>&") == "`&lt;i&gt;&amp;`"
+    # code spans are shown verbatim, so no entities or backslashes are added
+    assert esc_code("<i>&") == "`<i>&`"
+    assert esc_code('{"k": [1, 2]}') == '`{"k": [1, 2]}`'
+    assert esc_code("snake_case *x*") == "`snake_case *x*`"
+    # in a table a pipe always ends up behind an odd number of backslashes
+    assert esc_code("a\\|b", in_table=True) == "`a\\\\\\|b`"
+    assert esc_code("a\\\\|b", in_table=True) == "`a\\\\\\|b`"
+
+
+def _outside_code_spans(line):
+    """The parts of a Markdown line that are not inside a code span (CommonMark rules)."""
+    out, i, n = [], 0, len(line)
+    while i < n:
+        ch = line[i]
+        if ch == "\\" and i + 1 < n:
+            out.append(line[i:i + 2])
+            i += 2
+            continue
+        if ch != "`":
+            out.append(ch)
+            i += 1
+            continue
+        j = i
+        while j < n and line[j] == "`":
+            j += 1
+        fence = line[i:j]
+        k = j
+        close = -1
+        while k < n:
+            if line[k] == "`":
+                m = k
+                while m < n and line[m] == "`":
+                    m += 1
+                if m - k == len(fence):
+                    close = k
+                    break
+                k = m
+            else:
+                k += 1
+        if close < 0:
+            out.append(fence)
+            i = j
+        else:
+            out.append("CODE")
+            i = close + len(fence)
+    return "".join(out)
 
 
 def test_hostile_outputs_cannot_close_details_or_break_tables():
@@ -62,16 +107,87 @@ def test_hostile_outputs_cannot_close_details_or_break_tables():
         judge_verdict="regressed", judge_reasoning="</details> <b>bold</b> | pipe",
         tags=["t|ag", "`tick`"])], n_bootstrap=0)
     md = render_markdown(rep)
-    assert "</details>" in md  # exactly one, ours, on its own line at the end of the block
-    assert md.count("</details>") == 1 and md.count("<details>") == 1
-    assert "<script>" not in md and "</script>" not in md
-    assert "<b>" not in md
+    # Hostile text may appear verbatim, but only inside code spans, which
+    # GitHub never parses as HTML. Outside them there is exactly one
+    # <details> block (ours) and no injected tag.
+    outside = "\n".join(_outside_code_spans(ln) for ln in md.splitlines())
+    assert outside.count("</details>") == 1 and outside.count("<details>") == 1
+    assert md.splitlines().count("</details>") == 1  # ours, on its own line
+    assert "<script>" not in outside and "</script>" not in outside
+    assert "<b>" not in outside
     # outputs never start a line, so "</details>" and "# heading" cannot open a block
-    assert all(not ln.startswith(("&lt;", "<", "#")) for ln in md.splitlines()
+    assert all(not ln.startswith(("&lt;", "<", "#", "`")) for ln in md.splitlines()
                if "alert(1)" in ln)
     # the tag table has exactly 6 cells per row even with a pipe inside a tag
     tag_rows = [ln for ln in md.splitlines() if ln.startswith("| `")]
     assert tag_rows and all(len(re.split(r"(?<!\\)\|", ln)) == 8 for ln in tag_rows)
+
+
+def test_hostile_outputs_parse_as_code_with_a_commonmark_parser():
+    """Round trip through a real CommonMark + table parser (markdown-it-py)."""
+    import pytest
+
+    markdown_it = pytest.importorskip("markdown_it")
+    hostile = "</details>\n<script>alert(1)</script>\n| x | y |\n```\n# heading & <b>"
+    rep = DiffReport("v1_base", "v2`x", "m", "m", 1, [bare_case(
+        case_id="</details> | id", output_a=hostile, output_b='{"k": "<v>&"}',
+        judge_verdict="regressed", judge_reasoning="</details> <b>bold</b> | pipe",
+        tags=["t|ag", "`tick`", "a\\|b", "x<y&z"])], n_bootstrap=0)
+    md = render_markdown(rep)
+    tokens = markdown_it.MarkdownIt("commonmark").enable("table").parse(md)
+
+    def walk(toks):
+        for t in toks:
+            yield t
+            yield from walk(t.children or [])
+
+    every = list(walk(tokens))
+    raw_html = {line.strip() for t in every if t.type in ("html_inline", "html_block")
+                for line in t.content.splitlines() if line.strip()}
+    # the only raw HTML the parser sees is the module's own markup
+    assert raw_html == {"<details>", "<summary>Regressions (1)</summary>", "</details>",
+                        "<sub>", "</sub>"}, raw_html
+    code = [t.content for t in every if t.type == "code_inline"]
+    # outputs, versions and tags come back exactly as written (collapsed to one line)
+    assert " ".join(hostile.split()) in code
+    assert '{"k": "<v>&"}' in code
+    assert "v1_base" in code and "v2`x" in code
+    assert "t|ag" in code and "`tick`" in code and "x<y&z" in code
+    # the summary table keeps 2 cells per row and the tag table 6, pipes or not
+    tables = _table_cells(tokens)
+    assert [set(t) for t in tables] == [{2}, {6}], tables
+    assert len(tables[1]) == 1 + 4  # header plus one row per tag
+
+
+def _table_cells(tokens):
+    """Cells per row, grouped by table, from a markdown-it token stream."""
+    tables, rows, count = [], None, 0
+    for t in tokens:
+        if t.type == "table_open":
+            rows = []
+        elif t.type == "tr_open":
+            count = 0
+        elif t.type in ("td_open", "th_open"):
+            count += 1
+        elif t.type == "tr_close":
+            rows.append(count)
+        elif t.type == "table_close":
+            tables.append(rows)
+    return tables
+
+
+def test_version_names_render_without_backslashes():
+    rep = DiffReport("v1_base", "v2`x", "gpt-4o_mini", "m", 0, [], n_bootstrap=0)
+    line = render_markdown(rep).splitlines()[4]
+    assert line.startswith("A `v1_base` (gpt-4o\\_mini) vs B ``v2`x`` (m)"), line
+
+
+def test_lone_surrogate_is_replaced_so_the_summary_can_be_written(tmp_path):
+    rep = DiffReport("v1", "v2", "m", "m", 1, [bare_case(output_b="Thanks! \ud83d")],
+                     n_bootstrap=0)
+    md = render_markdown(rep)
+    assert "\ud83d" not in md and "Thanks! \ufffd" in md
+    (tmp_path / "s.md").write_text(md, encoding="utf-8")
 
 
 # ── Structure ─────────────────────────────────────────────────────────────────

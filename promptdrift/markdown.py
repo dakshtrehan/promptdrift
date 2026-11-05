@@ -11,7 +11,9 @@ The output is deterministic for the same report (no timestamps), so a CI job
 that updates one comment per pull request does not churn the comment on every
 run. Everything that originates in a model output or a case file (case ids,
 tags, outputs, judge reasoning) is escaped so it cannot inject HTML or
-Markdown, close the ``<details>`` block or break a table row.
+Markdown, close the ``<details>`` block or break a table row. Outputs, tags and
+version names sit in code spans, which GitHub shows verbatim: no HTML entities
+or backslashes are added inside them, so JSON braces and ``<`` look as they are.
 
 The report may be a :class:`~promptdrift.core.DiffReport` or the dict form
 written by ``--output`` / ``DiffReport.to_dict()`` (see ``report_from_dict``),
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import dataclasses
 import html
+import re
 from typing import Any, Mapping, Optional, Sequence, Union
 
 from .core import CaseResult, DiffReport
@@ -31,6 +34,7 @@ from .version import __version__
 VERDICT_EMOJI = {"safe": "✅", "review": "⚠️", "do_not_ship": "❌"}
 OUTPUT_CHARS = 160
 _MD_SPECIAL = "\\`*_[]~|"
+_SURROGATE = re.compile(r"[\ud800-\udfff]")
 
 
 def report_from_dict(data: Mapping[str, Any]) -> DiffReport:
@@ -71,17 +75,25 @@ def esc_code(s: Any, limit: Optional[int] = OUTPUT_CHARS, in_table: bool = False
     """Wrap untrusted text in a code span that cannot be closed or escaped from.
 
     Newlines collapse to spaces, the text is truncated to ``limit`` characters,
-    ``<``, ``>`` and ``&`` become entities so no HTML block can start, the span
-    uses one more backtick than the longest run inside, and ``|`` is escaped
-    when the span sits in a table cell.
+    the span uses one more backtick than the longest run inside, and ``|`` is
+    escaped when the span sits in a table cell (GitHub splits cells before it
+    looks at code spans). Nothing else is escaped: CommonMark shows code span
+    content literally, so ``<script>`` or ``</details>`` inside it stays text,
+    and entities or backslashes would show up as typed (``&#123;`` instead of
+    ``{``). The caller never starts a line with a span, so no HTML block can
+    begin either.
     """
     text = _one_line(s)
     if limit is not None and len(text) > limit:
         text = text[:limit - 3] + "..."
     if not text:
         return "(empty)"
-    text = html.escape(text, quote=False)
     if in_table:
+        # A pipe needs an odd number of backslashes in front of it to stay
+        # inside the cell, so make a run of backslashes before a pipe even
+        # first, then escape the pipe itself.
+        text = re.sub(r"\\+(?=\|)",
+                      lambda m: m.group(0) + ("\\" if len(m.group(0)) % 2 else ""), text)
         text = text.replace("|", "\\|")
     run, longest = 0, 0
     for ch in text:
@@ -283,8 +295,8 @@ def render_markdown(
     parts.append(f"{VERDICT_EMOJI[status]} **{VERDICT_LABEL[status]}**: {esc_text(reason)}")
     mode = "offline mode (stored outputs)" if rep.mode == "offline" else "live mode"
     parts.append(
-        f"A `{esc_text(rep.version_a)}` ({esc_text(rep.model_a)}) vs "
-        f"B `{esc_text(rep.version_b)}` ({esc_text(rep.model_b)}), "
+        f"A {esc_code(rep.version_a, limit=None)} ({esc_text(rep.model_a)}) vs "
+        f"B {esc_code(rep.version_b, limit=None)} ({esc_text(rep.model_b)}), "
         f"{rep.total_cases} case(s), {mode}, similarity {esc_text(rep.similarity)}.")
     if failures:
         parts.append("**Threshold failures**\n\n"
@@ -301,4 +313,6 @@ def render_markdown(
         footer += f" | [full HTML report in the run artifacts]({artifact_url})"
     footer += "</sub>"
     parts.append(footer)
-    return "\n\n".join(parts) + "\n"
+    # A lone surrogate (an emoji cut in half upstream) cannot be written as
+    # UTF-8, which would crash a step summary write; show U+FFFD instead.
+    return _SURROGATE.sub("\ufffd", "\n\n".join(parts) + "\n")
