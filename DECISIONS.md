@@ -703,3 +703,11 @@ So that parallel work fits together, these names were fixed in advance:
   removed; the test still asserts the outcomes and the presence of the
   `--promptdrift-html ignored` warning. After the fix the full suite passed
   twice on 3.9 and on 3.13, and the file passes standalone on both.
+
+## D15. CI runs on every pull request, not only those targeting main
+
+The v0.3.0 PR is stacked on the v0.2.0 PR branch so that it shows only the
+v0.3.0 delta and GitHub retargets it to `main` once v0.2.0 merges. `ci.yml`
+only ran for pull requests whose base was `main`, so a stacked PR got no
+checks. The trigger is now a bare `pull_request` (any base) plus
+`workflow_dispatch`, matching `docs.yml` and `promptdrift-example.yml`.
