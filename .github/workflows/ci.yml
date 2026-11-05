@@ -100,11 +100,14 @@ jobs:
         # The example data regresses on purpose, so the plugin must exit 1 with
         # exactly 17 generated tests (16 cases + summary) and 3 failures.
         run: |
+          # An empty directory is the only collection target, so the run holds
+          # just the plugin's generated items and not this repo's own tests.
+          mkdir -p "$RUNNER_TEMP/empty"
           set +e
-          pytest --promptdrift examples/offline/outputs.jsonl \
+          pytest "$RUNNER_TEMP/empty" --promptdrift examples/offline/outputs.jsonl \
             --promptdrift-checks examples/offline/checks.yaml \
             --promptdrift-max-drift 0.3 \
-            --junit-xml plugin-junit.xml -p no:cacheprovider --rootdir /tmp -q
+            --junit-xml plugin-junit.xml -p no:cacheprovider -q
           code=$?
           set -e
           test "$code" -eq 1

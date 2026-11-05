@@ -40,9 +40,11 @@ promptdrift diff "$HERE/outputs.jsonl" \
 status=${PIPESTATUS[0]}
 set -e
 
-# 2. Same run as machine readable JSON on stdout (first lines shown).
-promptdrift diff "$HERE/outputs.jsonl" --name-a v1 --name-b v2 \
-  --checks "$HERE/checks.yaml" --json | head -n 12
+# 2. The same report as machine readable JSON (first lines shown). The file
+# written by --output above holds exactly what --json prints, so it is read
+# back here instead of piping a second run through head, which would close
+# the pipe early and turn a clean exit into a broken pipe error.
+head -n 12 "$OUT/report.json"
 
 echo
 echo "reports written to $OUT:"

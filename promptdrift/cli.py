@@ -61,10 +61,15 @@ def _emit(report: DiffReport, args: argparse.Namespace) -> None:
     """Print / save a report and set the exit code. Shared by compare and diff."""
     from .reporter import print_json, print_report, save_report
 
-    if args.json:
-        print_json(report)
-    else:
-        print_report(report, show_cases=not args.summary, show_outputs=args.show_outputs)
+    try:
+        if args.json:
+            print_json(report)
+        else:
+            print_report(report, show_cases=not args.summary, show_outputs=args.show_outputs)
+    except BrokenPipeError:
+        # The reader closed the pipe (``promptdrift ... | head``). Stop printing,
+        # but still write the files and evaluate the gates so the exit code holds.
+        _silence_stdout()
 
     if args.output:
         save_report(report, args.output)
@@ -338,16 +343,43 @@ examples:
     ip.add_argument("--dir", default="./prompts", help="Output directory (default: ./prompts)")
 
     args = parser.parse_args(argv)
-    if args.command == "compare":
-        cmd_compare(args)
-    elif args.command == "diff":
-        cmd_diff(args)
-    elif args.command == "watch":
-        cmd_watch(args, parser)
-    elif args.command == "init":
-        cmd_init(args)
-    else:
-        parser.print_help()
+    try:
+        if args.command == "compare":
+            cmd_compare(args)
+        elif args.command == "diff":
+            cmd_diff(args)
+        elif args.command == "watch":
+            cmd_watch(args, parser)
+        elif args.command == "init":
+            cmd_init(args)
+        else:
+            parser.print_help()
+    finally:
+        _flush_stdout_quietly()
+
+
+def _flush_stdout_quietly() -> None:
+    """Flush stdout, and swallow a broken pipe (``promptdrift ... | head``).
+
+    Without this, Python reports the failed flush at interpreter shutdown and
+    exits with status 120, which turns a clean run into a CI failure. The
+    exit code chosen by the command (0, or 1 for a threshold breach) is kept.
+    """
+    try:
+        sys.stdout.flush()
+    except (BrokenPipeError, OSError):
+        _silence_stdout()
+
+
+def _silence_stdout() -> None:
+    """Point the stdout file descriptor at /dev/null after a broken pipe."""
+    import os
+
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+    except (OSError, ValueError):
+        pass
 
 
 if __name__ == "__main__":

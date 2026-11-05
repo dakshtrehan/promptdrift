@@ -711,3 +711,22 @@ v0.3.0 delta and GitHub retargets it to `main` once v0.2.0 merges. `ci.yml`
 only ran for pull requests whose base was `main`, so a stacked PR got no
 checks. The trigger is now a bare `pull_request` (any base) plus
 `workflow_dispatch`, matching `docs.yml` and `promptdrift-example.yml`.
+
+## D16. First real CI run: two failures fixed
+
+The first run of `ci.yml` on a GitHub runner failed in two places that the
+local runs had not shown.
+
+* The pytest plugin smoke step ran `pytest --promptdrift ...` from the repo
+  root with no path argument, so pytest collected this repo's own 364 tests
+  next to the plugin's 17 generated items and the `tests="17"` check failed.
+  The step now passes an empty directory as the only collection target.
+  Locally the agent had run the command from a different directory.
+* `examples/offline/run.sh` piped a second `--json` run through `head -n 12`
+  under `set -o pipefail`. On the runner `head` closed the pipe while Python
+  was still writing, Python reported the failed flush at shutdown and exited
+  120 instead of 1. The script now reads the first lines of the report.json it
+  already wrote. The CLI also gained a broken pipe guard: `promptdrift ... |
+  head` keeps writing its files, keeps its exit code and no longer prints a
+  traceback. A test with an outputs file larger than the pipe buffer proves the
+  failure on the old code and the fix on the new one.
