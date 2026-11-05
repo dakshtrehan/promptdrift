@@ -19,6 +19,7 @@ contains ``<script>`` is shown as text and never executed.
 from __future__ import annotations
 
 import html
+import json
 import re
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -36,6 +37,11 @@ _LEVEL_RANK = {"none": 0, "minor": 1, "moderate": 2, "major": 3, "regression": 4
 _WORD_RE = re.compile(r"(\S+)(\s*)")
 
 _e = html.escape
+
+#: Most word pairs (words in A times words in B) the exact word diff compares.
+#: ``SequenceMatcher`` gets close to quadratic on long, mostly equal texts
+#: with repeated words, so above this the diff goes line by line first.
+DIFF_BUDGET = 250_000
 
 
 # ── Word-level diff ──────────────────────────────────────────────────────────
@@ -87,9 +93,23 @@ def word_diff(a: str, b: str) -> tuple[str, str]:
     tokens; each side keeps its own whitespace (newlines included). Deleted
     words are wrapped in ``<del>`` on the A side and inserted words in
     ``<ins>`` on the B side. Everything is HTML-escaped.
+
+    Long texts stay fast: when ``len(words_a) * len(words_b)`` exceeds
+    ``DIFF_BUDGET`` the texts are matched line by line first and only changed
+    line blocks small enough are diffed word by word (larger changed blocks
+    are marked whole). When even the line pass is too big, or the text is one
+    long line, both sides are returned escaped with no marks.
     """
+    da, db, _ = _word_diff(a, b)
+    return da, db
+
+
+def _diff_words(a: str, b: str, mark_all: bool = False) -> tuple[str, str]:
     wa, ga = _tokens(a)
     wb, gb = _tokens(b)
+    if mark_all:
+        return (_render_side(wa, ga, [True] * len(wa), "del"),
+                _render_side(wb, gb, [True] * len(wb), "ins"))
     marks_a = [False] * len(wa)
     marks_b = [False] * len(wb)
     sm = SequenceMatcher(None, wa, wb, autojunk=False)
@@ -101,6 +121,35 @@ def word_diff(a: str, b: str) -> tuple[str, str]:
         for j in range(j1, j2):
             marks_b[j] = True
     return _render_side(wa, ga, marks_a, "del"), _render_side(wb, gb, marks_b, "ins")
+
+
+def _word_count(text: str) -> int:
+    return len(text.split()) + 1
+
+
+def _word_diff(a: str, b: str) -> tuple[str, str, str]:
+    """``word_diff`` plus how it was made: ``"word"``, ``"line"`` or ``"none"``."""
+    if _word_count(a) * _word_count(b) <= DIFF_BUDGET:
+        da, db = _diff_words(a, b)
+        return da, db, "word"
+    la, lb = a.splitlines(keepends=True), b.splitlines(keepends=True)
+    if (len(la) < 2 and len(lb) < 2) or len(la) * len(lb) > DIFF_BUDGET:
+        return _e(a), _e(b), "none"
+    out_a: list[str] = []
+    out_b: list[str] = []
+    for op, i1, i2, j1, j2 in SequenceMatcher(None, la, lb, autojunk=False).get_opcodes():
+        sa, sb = "".join(la[i1:i2]), "".join(lb[j1:j2])
+        if op == "equal":
+            out_a.append(_e(sa))
+            out_b.append(_e(sb))
+            continue
+        # no line in a changed block matches, so diff its words if it is small
+        # enough and mark it whole otherwise
+        small = _word_count(sa) * _word_count(sb) <= DIFF_BUDGET
+        da, db = _diff_words(sa, sb, mark_all=not small)
+        out_a.append(da)
+        out_b.append(db)
+    return "".join(out_a), "".join(out_b), "line"
 
 
 # ── Small formatting helpers ─────────────────────────────────────────────────
@@ -152,6 +201,11 @@ def _tag_chips(tags: Optional[Iterable[str]]) -> str:
     if not tags:
         return ""
     return "".join(f'<span class="tag">{_e(t)}</span>' for t in tags)
+
+
+def _tags_of(c: CaseResult) -> list[str]:
+    """The case's tags without empty or whitespace-only entries."""
+    return [t for t in (c.tags or []) if str(t).strip()]
 
 
 def _clamp_pct(v: float) -> float:
@@ -275,7 +329,7 @@ def _ci_section(report: DiffReport) -> str:
 def _tag_section(report: DiffReport) -> str:
     rows: dict[str, list[CaseResult]] = {}
     for c in report.cases:
-        for t in c.tags or []:
+        for t in _tags_of(c):
             rows.setdefault(t, []).append(c)
     if not rows:
         return ""
@@ -382,10 +436,16 @@ def _cost_block(c: CaseResult) -> str:
 
 def _case_tbody(report: DiffReport, c: CaseResult, index: int) -> str:
     is_reg = report._is_regression(c)
-    da, db = word_diff(c.output_a, c.output_b)
+    da, db, how = _word_diff(c.output_a, c.output_b)
     latency_delta = c.latency_b - c.latency_a
-    tags = c.tags or []
-    tag_attr = "|" + "|".join(tags) + "|" if tags else ""
+    tags = _tags_of(c)
+    # a JSON array, so a tag that contains a separator cannot match another tag
+    tag_attr = json.dumps(tags) if tags else ""
+    diff_note = {
+        "line": '<p class="muted small">Long outputs: changes are matched line by line, '
+                "and large changed blocks are highlighted whole.</p>",
+        "none": '<p class="muted small">Word diff omitted for long outputs.</p>',
+    }.get(how, "")
     fmt_cell = (f'<span class="warn">{_e(str(c.signature_a))} → {_e(str(c.signature_b))}</span>'
                 if c.format_changed else '<span class="muted">-</span>')
     ratio_cell = _num(c.length_ratio, 2) + "x" if c.length_ratio is not None else "-"
@@ -404,7 +464,7 @@ def _case_tbody(report: DiffReport, c: CaseResult, index: int) -> str:
         f'<h4>Input</h4>{_pre(c.input)}'
         f'<div class="diff"><div><h4>A: {_e(report.version_a)}</h4>{_pre(c.output_a, da)}</div>'
         f'<div><h4>B: {_e(report.version_b)}</h4>{_pre(c.output_b, db)}</div></div>'
-        + _checks_table(c) + _judge_block(c) + _structure_block(c) + _samples_block(c)
+        + diff_note + _checks_table(c) + _judge_block(c) + _structure_block(c) + _samples_block(c)
         + _cost_block(c)
         + (f'<h4>Tags</h4><p>{_tag_chips(tags)}</p>' if tags else "")
         + "</div></td></tr>"
@@ -429,7 +489,7 @@ def _case_tbody(report: DiffReport, c: CaseResult, index: int) -> str:
 def _case_section(report: DiffReport) -> str:
     levels = sorted({c.drift_level for c in report.cases}, key=lambda x: _LEVEL_RANK.get(x, 9))
     verdicts = sorted({c.judge_verdict for c in report.cases if c.judge_verdict})
-    tags = sorted({t for c in report.cases for t in (c.tags or [])})
+    tags = sorted({t for c in report.cases for t in _tags_of(c)})
 
     def options(values: Iterable[str]) -> str:
         return "".join(f'<option value="{_e(v)}">{_e(v)}</option>' for v in values)
@@ -575,17 +635,23 @@ Array.prototype.forEach.call(table.querySelectorAll('th[data-key]'),function(th)
     th.setAttribute('data-dir',asc?'asc':'desc');});});
 var q=document.getElementById('q'),lv=document.getElementById('f-level'),vd=document.getElementById('f-verdict'),
     tg=document.getElementById('f-tag'),rg=document.getElementById('f-reg'),count=document.getElementById('f-count');
-var total=bodies().length;
+var all=bodies(),total=all.length;
+function tagsOf(tb){if(!tb._tags){try{tb._tags=JSON.parse(tb.getAttribute('data-tags')||'[]');}catch(e){tb._tags=[];}}return tb._tags;}
+function textOf(tb){if(tb._text===undefined){tb._text=tb.textContent.toLowerCase();}return tb._text;}
 function apply(){var text=(q.value||'').toLowerCase(),n=0;
-  bodies().forEach(function(tb){var ok=true;
+  all.forEach(function(tb){var ok=true;
     if(lv&&lv.value&&tb.getAttribute('data-level')!==lv.value){ok=false;}
     if(vd&&vd.value&&tb.getAttribute('data-verdict')!==vd.value){ok=false;}
-    if(tg&&tg.value&&(tb.getAttribute('data-tags')||'').indexOf('|'+tg.value+'|')<0){ok=false;}
+    if(tg&&tg.value&&tagsOf(tb).indexOf(tg.value)<0){ok=false;}
     if(rg&&rg.checked&&tb.getAttribute('data-regression')!=='1'){ok=false;}
-    if(ok&&text&&tb.textContent.toLowerCase().indexOf(text)<0){ok=false;}
+    if(ok&&text&&textOf(tb).indexOf(text)<0){ok=false;}
     tb.classList.toggle('hidden',!ok);if(ok){n++;}});
   if(count){count.textContent=n+' of '+total;}}
-[q,lv,vd,tg,rg].forEach(function(el){if(el){el.addEventListener('input',apply);el.addEventListener('change',apply);}});
+var timer=null;
+function later(){if(timer){clearTimeout(timer);}timer=setTimeout(function(){timer=null;apply();},150);}
+function now(){if(timer){clearTimeout(timer);timer=null;}apply();}
+if(q){q.addEventListener('input',later);q.addEventListener('change',now);}
+[lv,vd,tg,rg].forEach(function(el){if(el){el.addEventListener('input',now);el.addEventListener('change',now);}});
 })();
 """  # noqa: E501
 
@@ -608,6 +674,11 @@ def render_html(report: DiffReport) -> str:
 
 
 def save_html(report: DiffReport, path: Union[str, Path]) -> None:
-    """Write ``render_html(report)`` to ``path`` as UTF-8."""
+    """Write ``render_html(report)`` to ``path`` as UTF-8.
+
+    Lone surrogates in the text become U+FFFD so the strict UTF-8 write cannot fail.
+    """
+    from .export import _utf8_safe
+
     with open(path, "w", encoding="utf-8") as f:
-        f.write(render_html(report))
+        f.write(_utf8_safe(render_html(report)))
