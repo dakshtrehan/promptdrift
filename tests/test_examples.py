@@ -20,7 +20,9 @@ ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = ROOT / "examples"
 OFFLINE = EXAMPLES / "offline"
 
-NO_KEYS = {**os.environ, "OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": "", "PYTHONIOENCODING": "utf-8"}
+NO_KEYS = {**os.environ, "OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": "", "PYTHONIOENCODING": "utf-8",
+           # an accidental live call fails locally instead of reaching any API
+           "OPENAI_BASE_URL": "http://127.0.0.1:9", "ANTHROPIC_BASE_URL": "http://127.0.0.1:9"}
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -243,7 +245,27 @@ def test_readme_offline_blocks_make_no_paid_calls():
     for param in BLOCKS:
         code = param.values[0]
         assert "--judge" not in code
-        assert "promptdrift compare " not in code
+        for line in code.splitlines():
+            assert "compare" not in _words(line), line
+
+
+def _words(line):
+    """Shell words of one line, ignoring comments ("watch --once compare" is still caught)."""
+    import shlex
+
+    if line.lstrip().startswith("#"):
+        return []
+    try:
+        return shlex.split(line, comments=True)
+    except ValueError:  # an unbalanced quote that continues on the next line
+        return line.split("#", 1)[0].split()
+
+
+def test_words_helper_catches_wrapped_compare():
+    assert "compare" in _words("promptdrift watch --once compare v1.yaml v2.yaml --cases c")
+    assert "compare" not in _words("# promptdrift compare is the live mode")
+    assert "compare" not in _words('echo "we compare outputs" # compare')
+    assert "compare" in _words('promptdrift compare "a b.yaml')
 
 
 # ── house rules ──────────────────────────────────────────────────────────────

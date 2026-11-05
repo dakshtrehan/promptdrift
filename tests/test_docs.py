@@ -75,8 +75,18 @@ def _blank_env() -> dict:
     env = dict(os.environ)
     env["OPENAI_API_KEY"] = ""
     env["ANTHROPIC_API_KEY"] = ""
+    # an accidental live call fails locally instead of reaching any API
+    env["OPENAI_BASE_URL"] = "http://127.0.0.1:9"
+    env["ANTHROPIC_BASE_URL"] = "http://127.0.0.1:9"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     return env
+
+
+def _offline_guard(argv: list) -> None:
+    """Documented commands must be offline: no judge and no live compare anywhere in argv."""
+    assert "--judge" not in argv, "judge flag in a docs-test block"
+    # the whole argv, so "promptdrift watch --once compare ..." is caught too
+    assert "compare" not in argv, "live compare in a docs-test block"
 
 
 def _runnable_blocks() -> list[tuple[str, str]]:
@@ -280,10 +290,27 @@ def test_marked_block_runs(page, command, docs_cwd):
     elif argv[0] == "promptdrift":
         argv = [sys.executable, "-m", "promptdrift.cli", *argv[1:]]
     # Guard rails: documented commands must be offline, so no judge and no live compare.
-    assert "--judge" not in argv, f"{page}: judge flag in a docs-test block"
-    assert "compare" not in argv[1:4], f"{page}: live compare in a docs-test block"
+    try:
+        _offline_guard(argv)
+    except AssertionError as e:
+        raise AssertionError(f"{page}: {e}") from None
     result = subprocess.run(argv, capture_output=True, text=True, env=_blank_env(),
                             cwd=docs_cwd, timeout=300)
     assert result.returncode == 0, (
         f"{page}: `{command}` exited {result.returncode}\n"
         f"stdout:\n{result.stdout[-2000:]}\nstderr:\n{result.stderr[-2000:]}")
+
+
+@pytest.mark.parametrize("command", [
+    "promptdrift compare a.yaml b.yaml --cases c.json",
+    "promptdrift watch --once compare examples/live/v1.yaml examples/live/v2.yaml --cases x",
+    "promptdrift watch compare a.yaml b.yaml --cases c.json",
+    "promptdrift diff out.jsonl --judge",
+])
+def test_offline_guard_rejects_live_commands(command):
+    with pytest.raises(AssertionError):
+        _offline_guard(shlex.split(command))
+
+
+def test_offline_guard_accepts_offline_commands():
+    _offline_guard(shlex.split("promptdrift watch --once diff examples/outputs.jsonl --summary"))

@@ -225,3 +225,48 @@ def test_ollama_provider(monkeypatch):
 def test_get_provider_unknown():
     with pytest.raises(ValueError, match="Unknown provider"):
         get_provider("nope")
+
+
+# ── review fix: a blank ANTHROPIC_API_KEY must not become an explicit "" key ──
+@pytest.mark.parametrize("env, arg, expected", [
+    ("", None, None),        # blank env: let the SDK look for credentials (and fail early)
+    (None, None, None),      # unset env
+    ("sk-env", None, "sk-env"),
+    ("", "sk-arg", "sk-arg"),
+])
+def test_anthropic_blank_key_is_passed_as_none(monkeypatch, env, arg, expected):
+    seen = {}
+
+    class FakeAnthropic:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=FakeAnthropic))
+    if env is None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", env)
+    AnthropicProvider(api_key=arg)
+    assert seen == {"api_key": expected}
+
+
+def test_anthropic_real_sdk_with_blank_key_fails_before_the_network(monkeypatch):
+    anthropic = pytest.importorskip("anthropic")
+    for name in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_PROFILE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("HOME", "/nonexistent")
+    import socket
+
+    def no_network(*a, **k):
+        raise AssertionError("network access attempted")
+    monkeypatch.setattr(socket.socket, "connect", no_network)
+    monkeypatch.setattr(socket, "getaddrinfo", no_network)
+    try:
+        p = AnthropicProvider(model="claude-haiku-4-5-20251001")
+    except Exception:
+        return  # the SDK refused to build a client without credentials: no request possible
+    with pytest.raises(Exception) as e:
+        p.complete("hi", max_tokens=1)
+    assert "network access attempted" not in str(e.value)
+    assert not isinstance(e.value, anthropic.APIConnectionError)

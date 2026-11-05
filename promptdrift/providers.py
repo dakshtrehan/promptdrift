@@ -138,7 +138,11 @@ class AnthropicProvider(BaseProvider):
                 import anthropic
             except ImportError:
                 raise ImportError("pip install anthropic") from None
-            client = anthropic.Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
+            # A blank key becomes None: the SDK then uses its own credential
+            # lookup and fails before any request when nothing is configured,
+            # where an explicit "" would send an unauthenticated request.
+            client = anthropic.Anthropic(
+                api_key=api_key or os.environ.get("ANTHROPIC_API_KEY") or None)
         self.client = client
         self.model = model
         self.temperature_supported = (anthropic_supports_temperature(model)
