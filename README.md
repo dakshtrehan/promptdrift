@@ -1,102 +1,86 @@
 <div align="center">
 
-# promptdrift ⚡
+# promptdrift
 
-**Semantic, structural and check-based diff for LLM prompts and model outputs.**
-Catch regressions before they reach production.
+**Catch LLM prompt regressions in CI.**
+Semantic, structural and check-based diff for prompts and model outputs, with a GitHub Action, a pytest plugin and a self-contained HTML report.
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![CI](https://github.com/dakshtrehan/promptdrift/actions/workflows/ci.yml/badge.svg)](https://github.com/dakshtrehan/promptdrift/actions)
+[![CI](https://github.com/dakshtrehan/promptdrift/actions/workflows/ci.yml/badge.svg)](https://github.com/dakshtrehan/promptdrift/actions/workflows/ci.yml)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%20to%203.13-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-mkdocs--material-orange.svg)](https://dakshtrehan.github.io/promptdrift/)
 
 </div>
 
 ---
 
-You tweaked your system prompt. Or swapped one model for another. Or bumped the temperature.
+You edited a system prompt. Or moved from one model to the next. Or switched providers to save money. The outputs still look fine in the three cases you eyeballed.
 
-**How do you know your outputs didn't quietly get worse?**
+**How do you know the other two hundred did not quietly get worse?**
 
-`promptdrift` compares two versions of a prompt (or two sets of stored outputs) case by case and tells you:
+`promptdrift` compares two versions of a prompt, or two sets of logged outputs, case by case, and turns the result into something a CI job can act on: a drift score with a confidence interval, hard pass-to-fail check flips, format changes that would break a parser, a noise floor so you can tell real change from sampling noise, and an exit code.
 
-* how much the meaning changed (semantic drift),
-* whether the shape changed in a way that could break a parser (structural drift),
-* whether hard checks you care about went from pass to fail (deterministic checks),
-* how much of the change is just sampling noise (multi-sample stability),
-* how sure you can be about the headline numbers (bootstrap confidence intervals),
-* and, optionally, what an LLM judge thinks, asked in both orders so position bias is visible.
+## 30 second demo
 
-```text
-$ promptdrift diff examples/outputs.jsonl --name-a v1 --name-b v2 --summary
+No API key, no model call, no cost. The repository ships 16 logged cases from a support assistant, two of which regress on purpose.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  ⚡ promptdrift  v0.2.0 · github.com/dakshtrehan/promptdrift
-  offline mode: stored outputs, no generation calls
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+![promptdrift diff on the offline example](docs/assets/demo.gif)
 
-  A  v1  (stored)
-  B  v2  (stored)
-  Cases: 5
+<sup>Static version: [docs/assets/demo.svg](docs/assets/demo.svg). Rendered from the real output of the command shown.</sup>
 
-  Summary
-  ──────────────────────────────────────────────────────────────────────
-  Avg drift         ██████████░░░░░░░░░░░░  45.9%  95% CI 21.4 to 74.0%
-  Regression rate   ████░░░░░░░░░░░░░░░░░░  20.0%  95% CI 0.0 to 60.0%
-
-  ↑ Improved    0   ↓ Regressed   1   → Neutral     4
-
-  Structure  format changed 2   JSON validity changed 0 (broken 0)   median length B/A 1.46x
-
-  Checks     pass A 100.0%  B 66.7%  (3 cases)   pass→fail 1   fail→pass 0
-
-  Stability  n=3/side   noise floor 39.5% (A 39.5%, B 39.5%)   excess drift -13.2%   above noise 0/1
-
-  ──────────────────────────────────────────────────────────────────────
-  ✗  DO NOT SHIP: 1 regression(s) detected
-  ──────────────────────────────────────────────────────────────────────
+```bash
+git clone https://github.com/dakshtrehan/promptdrift && cd promptdrift
+pip install -e .
+promptdrift diff examples/offline/outputs.jsonl --name-a v1 --name-b v2 --checks examples/offline/checks.yaml --summary
 ```
 
-That run made no model calls and cost nothing. With `--fail-on-regression` the exit code is `1` when a regression is found, so it drops straight into CI.
+Add `--max-regressions 0` (or `--fail-on-regression`) and the exit code is `1`, so the same command is a CI gate. Add `--html report.html` and you get the report below.
 
----
+## The HTML report
+
+One file, inline CSS and JavaScript, zero network requests: open it from a CI artifact or an air-gapped laptop.
+
+| Light | Dark |
+|---|---|
+| ![HTML report, light mode](docs/assets/report-light.png) | ![HTML report, dark mode](docs/assets/report-dark.png) |
+
+Click any row for the side-by-side word-level diff:
+
+![Expanded case with word-level diff](docs/assets/report-diff.png)
+
+Sortable and filterable case table (free text, drift level, judge verdict, tag, regressions only), per-tag breakdown, bootstrap confidence interval bars, light and dark mode with a remembered toggle, readable with JavaScript disabled and at phone width.
 
 ## Install
 
-> promptdrift is **not on PyPI yet**. `pip install promptdrift` will not work until the first release is published. Install from GitHub for now.
+> promptdrift is **not on PyPI yet**. `pip install promptdrift` does not work until the first release is published (see [RELEASE.md](RELEASE.md)). Install from GitHub for now.
 
 ```bash
 pip install "git+https://github.com/dakshtrehan/promptdrift.git"
 ```
 
-Or from a clone:
+Or from a clone: `git clone https://github.com/dakshtrehan/promptdrift && cd promptdrift && pip install -e .`
 
-```bash
-git clone https://github.com/dakshtrehan/promptdrift
-cd promptdrift
-pip install -e .
-```
+The only required dependency is PyYAML. Extras:
 
-The only required dependency is PyYAML. Provider SDKs are optional extras, needed only for live mode or the judge:
-
-```bash
-pip install -e ".[openai]"      # OpenAI
-pip install -e ".[anthropic]"   # Anthropic / Claude
-pip install -e ".[all]"         # both
-```
+| Extra | Installs | Needed for |
+|---|---|---|
+| `[openai]` | `openai` | live mode or the judge with OpenAI |
+| `[anthropic]` | `anthropic` | live mode or the judge with Claude |
+| `[all]` | both SDKs | |
+| `[watch]` | `watchdog` | faster wake-ups in `promptdrift watch` (optional, polling works without it) |
+| `[dev]` | pytest, ruff, mypy, build, twine | contributing |
 
 Ollama (local models) needs `requests`, which most environments already have.
 
----
+## Feature tour
 
-## Two ways to run it
+### Offline diff on logged outputs
 
-### 1. Offline mode: compare outputs you already have
-
-No model is called. Give it JSONL with one record per case:
+The cheapest and most common way to use promptdrift: log the outputs of the old and new prompt (from a replay, a shadow deployment or a notebook) and diff them. One JSON object per line:
 
 ```jsonl
-{"case_id": "capital", "input": "What is the capital of France?", "output_a": "Paris", "output_b": "The capital of France is Paris."}
-{"case_id": "extract", "output_a": "{\"name\": \"Ada\"}", "output_b": "```json\n{\"name\": \"Ada\"}\n```"}
+{"case_id": "capital", "input": "What is the capital of France?", "output_a": "Paris", "output_b": "The capital of France is Paris.", "tags": ["geo"]}
+{"case_id": "extract", "output_a": "{\"name\": \"Ada\"}", "output_b": "```json\n{\"name\": \"Ada\"}\n```", "checks": {"json_keys": ["name"]}}
 ```
 
 | Field | Required | Meaning |
@@ -106,33 +90,36 @@ No model is called. Give it JSONL with one record per case:
 | `input` | no | Shown in the report and given to the judge |
 | `expected` | no | Judge context, and the default value for an `exact` check |
 | `checks` | no | Deterministic checks, see below |
-
-A JSON array of the same records also works.
+| `tags` | no | Labels for the per-tag breakdown, the CSV column and the JUnit classname |
 
 ```bash
-promptdrift diff outputs.jsonl --name-a old --name-b new
-promptdrift diff outputs.jsonl --checks checks.json --fail-on-regression
-promptdrift diff outputs.jsonl --judge           # opt in to an LLM judge (this does call a model)
+promptdrift diff examples/outputs.jsonl --name-a v1 --name-b v2
+promptdrift diff examples/outputs.jsonl --name-a v1 --name-b v2 --json -o report.json
 ```
 
 ```python
+import yaml
+
 from promptdrift import compare_outputs, print_report
 
-report = compare_outputs("outputs.jsonl", version_a="old", version_b="new")
-print_report(report)
+checks = yaml.safe_load(open("examples/offline/checks.yaml"))      # default checks, optional
+report = compare_outputs("examples/offline/outputs.jsonl", version_a="v1", version_b="v2",
+                         checks=checks)
+print(report.avg_drift, len(report.regressions), report.confidence_intervals()["avg_drift"])
 
 # or pass records directly
 report = compare_outputs([
     {"case_id": "c1", "output_a": "Paris", "output_b": "The capital is Paris."},
 ])
+print_report(report, show_cases=False)
 ```
 
-### 2. Live mode: run two prompt configs against test cases
+### Live mode: two prompt configs against golden cases
 
 ```bash
 promptdrift init --dir ./prompts         # scaffolds v1.yaml, v2.yaml, golden.json
 export OPENAI_API_KEY=sk-...             # or ANTHROPIC_API_KEY, or use Ollama
-promptdrift compare prompts/v1.yaml prompts/v2.yaml --cases prompts/golden.json
+promptdrift compare prompts/v1.yaml prompts/v2.yaml --cases prompts/golden.json --samples 3
 ```
 
 ```yaml
@@ -146,239 +133,224 @@ temperature: 0.0
 max_tokens: 256
 ```
 
-```python
-from promptdrift import compare, print_report
-
-report = compare("v1.yaml", "v2.yaml", cases="golden.json", samples=3)
-print_report(report)
-```
-
-Test cases can be JSON, JSONL or YAML. Each needs `input`; `id`, `expected` and `checks` are optional.
-
----
-
-## What gets measured
-
-### Semantic drift
-
-Per case, `similarity` is in 0 to 1 and `drift_score = 1 - similarity`, bucketed as none (< 5%), minor (< 20%), moderate (< 50%) or major.
-
-The default similarity is **TF-IDF cosine**: pure Python, free, offline and deterministic. It measures word overlap, not deep meaning, so treat it as a cheap first signal. Paraphrases with different words score as drift; that is what the judge and checks are for.
-
-Embedding similarity is opt-in:
-
-```bash
-promptdrift compare v1.yaml v2.yaml --cases golden.json --similarity embedding
-```
-
-or set `embedding_model` in a config. It uses OpenAI embeddings (or Ollama for Ollama configs). If no embedder is reachable the run falls back to TF-IDF and says so. Each case records the method that actually ran in `similarity_method`. Embedding and TF-IDF scores are on different scales, so do not compare numbers across the two.
+Live mode makes `2 x samples x cases` generation calls plus up to `2 x cases` judge calls, and it costs money. `examples/live/mock_provider.py` shows the same path driven by a scripted provider, for tests.
 
 ### Structural drift
 
-Did the shape of the output change? Each output gets a format signature built from:
+Did the shape change? Each output gets a format signature (markdown fence, JSON container type, list, headings, line-count bucket); the report shows `signature_a -> signature_b` per case, counts format changes, JSON validity changes and JSON that broke (valid in A, invalid in B), and the median length ratio. Structural changes are reported, not counted as regressions; use a check or `--max-format-changes` when a format change should fail the run.
 
-* markdown code fence,
-* JSON container type (`object` or `array`; bare scalars like `30` count as text),
-* bullet or numbered list,
-* markdown headings,
-* non-blank line count (bucketed as 1, 2 to 4, 5 or more).
+### Deterministic checks and flips
 
-Per case you get `signature_a`, `signature_b`, `format_changed`, `json_valid_a`, `json_valid_b`, `json_validity_changed` and `length_ratio` (`len(B) / len(A)`). The summary counts format changes, JSON validity changes, JSON that broke (valid in A, invalid in B) and the median length ratio. JSON validity is judged after removing one surrounding code fence, so "the JSON gained a fence" is a format change but not a validity change.
+Checks run on both outputs, no model needed. **A check that passed in A and fails in B is a regression.** A fail-to-pass flip is an improvement.
 
-Structural changes are reported, not counted as regressions on their own. Use a check if a format change should fail the run.
-
-### Deterministic checks
-
-Checks run on both outputs without any model. A case passes when all its checks pass. **A pass in A that becomes a fail in B is a regression.**
-
-```json
-{"id": "extract", "input": "...", "checks": [
-  {"type": "regex", "pattern": "\\bAda\\b", "flags": "i"},
-  {"type": "json_keys", "keys": ["name", "age"]},
-  {"type": "exact", "value": "96", "ignore_case": true}
-]}
+```yaml
+# checks.yaml: applied to every case that has no checks of its own
+- type: regex
+  pattern: "\\b(refund|refunded)\\b"
+  flags: i
 ```
-
-Shorthand: `"checks": {"regex": "\\b96\\b", "json_keys": ["name"], "exact": true}`. An `exact` check with no value (or `"exact": true`) compares against the case's `expected`.
 
 | Type | Passes when |
 |---|---|
 | `regex` | `re.search(pattern, output)` matches. Optional `flags`: any of `i`, `m`, `s` |
 | `json_keys` | Output parses as a JSON object (one code fence allowed) with every listed top-level key |
-| `exact` | Output equals `value` after trimming whitespace (`strip: false` to disable; `ignore_case: true` optional) |
+| `exact` | Output equals `value` after trimming whitespace (`strip: false`, `ignore_case: true` optional); no value means the case's `expected` |
 
-Apply one spec to every case that has none with `--checks checks.json` (JSON or YAML) or `checks=` in Python. The summary reports pass rates for A and B and the `pass_to_fail` and `fail_to_pass` counts.
+Per-case checks go in the record (`"checks": [...]` or the shorthand `{"regex": "...", "json_keys": [...]}`); a default spec comes from `--checks FILE` or `checks=` in Python.
 
-### Multi-sample stability
+### Noise floor: is it real change or sampling noise?
 
-Outputs vary between runs of the same prompt. Without a noise floor you cannot tell a real change from sampling noise.
-
-```bash
-promptdrift compare v1.yaml v2.yaml --cases golden.json --samples 5
-```
-
-In offline mode, pass lists: `"output_a": ["...", "...", "..."]`.
-
-Per case:
-
-* `drift_score`: mean drift over all A x B sample pairs,
-* `within_drift_a`, `within_drift_b`: mean drift between samples of the same version,
-* `noise_floor`: mean of the two within-version drifts,
-* `excess_drift = drift_score - noise_floor`: how much more the versions differ than each one differs from itself. It can be negative, and is left unclipped so averages are not biased upward.
-
-The summary reports the average noise floor, average excess drift and how many cases are more than 0.05 above their noise floor. Checks run on every sample; a side passes when at least half its samples pass. Structure and the judge use the first sample of each side.
+Sample each side several times (`--samples 5` in live mode, or lists in `output_a` / `output_b` offline). Per case you get the within-version drift of A and B, their mean as the `noise_floor`, and `excess_drift = drift - noise_floor`. A prompt that drifts 30 percent against itself has not "changed" when the new version drifts 32 percent from it.
 
 ### Confidence intervals
 
-The report shows 95 percent bootstrap confidence intervals for the average drift and the regression rate (and the average excess drift when samples are used). Cases are resampled 1000 times with a fixed seed, so the same input always gives the same interval. Change it with `--bootstrap N` and `--seed S`, or turn it off with `--bootstrap 0`.
+The headline average drift and regression rate come with 95 percent bootstrap intervals (seeded, so the same input gives the same interval). Five cases give a wide interval; that is the report telling you to add cases, not noise to ignore. `--bootstrap N` and `--seed S` tune it, `--bootstrap 0` turns it off.
 
-With only a handful of cases the intervals are wide, as in the example above, and the percentile bootstrap tends to be a little too narrow for very small samples. Treat a wide interval as a reason to add cases, not as noise to ignore.
+### Thresholds and exit codes
 
-### LLM judge
-
-In live mode an LLM judge rates each drifted case as improved, regressed or neutral. In offline mode it is off unless you pass `--judge`.
-
-* **Provider-agnostic.** `--judge-provider openai|anthropic|ollama`, or in Python pass any object with a `complete(system, prompt, **kwargs)` method as `judge_provider`.
-* **Default provider** comes from the environment: OpenAI if `OPENAI_API_KEY` is set, otherwise Anthropic if only `ANTHROPIC_API_KEY` is set. With neither, the judge is skipped with a message. Default models: `gpt-4o-mini` and `claude-haiku-4-5-20251001`; override with `--judge-model`.
-* **Both orders.** Each case is judged as (A, B) and again as (B, A). If the two verdicts agree, that is the verdict. If they disagree, the case is marked `inconsistent`; if a call fails or returns unusable text, it is marked `error`. Neither counts as a regression or an improvement. The summary reports the order-inconsistency rate, which is a direct measure of the judge's position bias. `--judge-single-order` restores the single-call behaviour of v0.1.1 at half the cost.
-
-The judge is the only feature that costs money in offline mode, and it is opt-in there.
-
----
-
-## Providers
-
-| Provider | `provider:` | Notes |
-|---|---|---|
-| OpenAI | `openai` | Needs `OPENAI_API_KEY` and `pip install openai` |
-| Anthropic | `anthropic` | Needs `ANTHROPIC_API_KEY` and `pip install anthropic` (SDK 1.x or 2.x) |
-| Ollama | `ollama` | Local server at `http://localhost:11434` |
-
-**Anthropic sampling parameters.** Claude models from 4.7 on only accept default sampling, and `anthropic` SDK 2.x defaults to an API version that rejects `temperature`. promptdrift sends `temperature` (and `top_p`, `top_k`) only to models before 4.7, and then with the `anthropic-version: 2023-06-01` header. For newer models the value from your config is dropped. Response text is read from `text` blocks only, so thinking blocks are skipped. If you use a model id promptdrift cannot parse, set the behaviour explicitly:
-
-```yaml
-provider: anthropic
-model: my-proxy-model
-provider_options:
-  temperature_supported: true
+```bash
+promptdrift diff outputs.jsonl --max-drift 0.10 --max-regressions 0 --max-format-changes 0 --max-flips 0
 ```
 
-`provider_options` passes extra keyword arguments to any provider, for example `base_url` for Ollama.
+Each breach prints one sentence to stderr (`avg drift 17.9% exceeds max-drift 10.0%`) and the exit code is `1`. `--max-drift` is a fraction on the `avg_drift` scale; the count limits are inclusive. `--fail-on-regression` from v0.2.0 is unchanged. The same gates are available in Python:
 
----
+```python
+from promptdrift import compare_outputs, evaluate_thresholds
 
-## Config reference
+report = compare_outputs("examples/offline/outputs.jsonl", version_a="v1", version_b="v2")
+failures = evaluate_thresholds(report, max_drift=0.10, max_regressions=0)
+print(failures)
+# ['avg drift 17.9% exceeds max-drift 10.0%', '2 regression(s) exceed max-regressions 0']
+```
+
+### LLM judge, asked in both orders
+
+In live mode a judge model rates each drifted case as improved, regressed or neutral; offline it is off unless you pass `--judge`. It is asked twice, (A, B) and (B, A). Agreement is the verdict; disagreement is marked `inconsistent` and counted separately, so the judge's position bias is visible instead of hidden in the regression count. Any provider name or any object with `complete(system, prompt, **kwargs)` works as the judge; the default comes from `OPENAI_API_KEY`, then `ANTHROPIC_API_KEY`. The judge is the only feature that costs money in offline mode.
+
+### HTML, CSV and JUnit XML
+
+```bash
+promptdrift diff examples/offline/outputs.jsonl --checks examples/offline/checks.yaml --html report.html --csv cases.csv --junit junit.xml
+```
+
+```python
+from promptdrift import compare_outputs, save_csv, save_html, save_junit
+
+report = compare_outputs("examples/offline/outputs.jsonl", version_a="v1", version_b="v2")
+save_html(report, "report.html")                           # one file, no network
+save_csv(report, "cases.csv")                              # scalar fields per case
+save_csv(report, "cases_full.csv", include_outputs=True)   # plus input, output_a, output_b
+save_junit(report, "junit.xml")                            # regressions become <failure>
+```
+
+The JUnit file has one testcase per case, a `<failure>` for each regression, an `<error>` for judge errors, and suite properties (`avg_drift`, `regression_rate`, `verdict`, CI bounds), so Jenkins, GitLab and GitHub test reporters show results natively.
+
+### GitHub Action
+
+A composite action at the root of this repository posts (or updates, one comment per PR) a summary comment with drift, flips, format changes and confidence intervals, writes the job summary, uploads the HTML, JSON, JUnit and CSV reports as an artifact, and fails on your thresholds. Copy and paste:
+
+```yaml
+name: promptdrift
+on:
+  pull_request:
+permissions:
+  contents: read
+  pull-requests: write   # only for the comment
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dakshtrehan/promptdrift@main   # or @v0.3.0 once tagged
+        with:
+          outputs: prompts/outputs.jsonl
+          checks: prompts/checks.yaml
+          max-drift: "0.15"
+          max-flips: "0"
+```
+
+Offline mode needs no key. For live mode set `config-a`, `config-b` and `cases` and pass the provider key through `env:`; `judge` defaults to `"false"`. Outputs such as `verdict`, `avg-drift`, `regressions`, `flips` and `report-junit` can feed later steps. Fork PRs without a write token get a warning instead of a failure. Every input and output is documented in [action/README.md](action/README.md); this repository dogfoods the action in [.github/workflows/promptdrift-example.yml](.github/workflows/promptdrift-example.yml).
+
+### pytest plugin
+
+Installed with the package and inert until `--promptdrift` is passed:
+
+```bash
+pytest --promptdrift outputs.jsonl --promptdrift-max-drift 0.2 --promptdrift-max-regressions 0 --junit-xml junit.xml
+```
+
+One test per case (`promptdrift::outputs.jsonl::<case_id>`, failing on regressions with a readable message showing the reason, drift, judge verdict, flip and both outputs) plus a `summary` test per file gated by the thresholds. Items carry the `promptdrift` marker (`-m promptdrift`, `-m "not promptdrift"`), `--promptdrift-checks`, `--promptdrift-json` and `--promptdrift-html` save checks and reports, and a `promptdrift_report` fixture exposes the `DiffReport`. Disable with `-p no:promptdrift`.
+
+Without the plugin, in any test runner:
+
+```python
+from promptdrift import assert_no_regressions, compare_outputs
+
+
+def test_prompt_v2_does_not_regress():
+    report = compare_outputs("examples/outputs.jsonl", version_a="v1", version_b="v2")
+    assert_no_regressions(report, max_drift=0.5, max_regressions=1)   # max_regressions=0 by default
+```
+
+The `AssertionError` lists every failed threshold in the same wording as the CLI, then describes each regressed case.
+
+### Watch mode
+
+```bash
+promptdrift watch diff outputs.jsonl --summary                   # re-runs on every save, offline, free
+promptdrift watch --clear --interval 0.5 diff outputs.jsonl --checks checks.yaml --html report.html
+promptdrift watch --once diff outputs.jsonl --fail-on-regression   # one run, exit code propagated
+```
+
+Every `compare` and `diff` flag works after the command name. Inputs are watched (configs, cases, outputs, checks), outputs never are. Pure Python polling by default; `pip install promptdrift[watch]` adds watchdog for faster wake-ups. Regressions do not stop the loop, Ctrl-C exits 0, and a cost warning is printed before any live run.
+
+### Tags
+
+Add `"tags": ["billing", "json"]` (or one string) to any case or offline record. Tags show up as chips in the HTML case table, drive the per-tag breakdown (cases, average drift, regressions, flips, format changes) and the tag filter, land in the `tags` CSV column, and become the JUnit `classname`.
+
+## Concepts in two paragraphs
+
+**Drift** is `1 - similarity` between the old and new output of the same case, scored by default with TF-IDF cosine: pure Python, free, deterministic and offline. It is a change detector, not a meaning detector: a faithful paraphrase scores as drift and a one-word negation scores as nearly identical. That is why drift is bucketed (none, minor, moderate, major) and reported with a bootstrap confidence interval, and why the verdict never calls a case a regression on drift alone. Embedding similarity (`--similarity embedding`) is opt-in and on a different scale.
+
+**Flips** are the hard signal: a deterministic check (regex, JSON keys, exact match) that passed on A and fails on B is a regression, full stop. The LLM judge, when you pay for it, adds a soft signal and is asked in both orders so its position bias shows up as `inconsistent` rather than as a wrong verdict. The **noise floor** closes the loop: with several samples per side you learn how much a prompt drifts against itself, and `excess_drift` is what is left after subtracting that. SAFE TO SHIP means no regressions and under 5 percent drift; REVIEW means drift, a format change or an inconsistent judge; DO NOT SHIP means at least one regression.
+
+## Documentation
+
+The full documentation is at **https://dakshtrehan.github.io/promptdrift/** (built from `docs/` with mkdocs-material; deployed from `main` once GitHub Pages is enabled for the repository, see [RELEASE.md](RELEASE.md)).
+
+* [Quickstart](https://dakshtrehan.github.io/promptdrift/quickstart/)
+* Concepts: [semantic drift](https://dakshtrehan.github.io/promptdrift/concepts/drift/), [checks and flips](https://dakshtrehan.github.io/promptdrift/concepts/flips/), [noise floor](https://dakshtrehan.github.io/promptdrift/concepts/noise-floor/), [structural drift](https://dakshtrehan.github.io/promptdrift/concepts/structure/), [judge](https://dakshtrehan.github.io/promptdrift/concepts/judge/), [confidence intervals](https://dakshtrehan.github.io/promptdrift/concepts/confidence/), [verdicts and exit codes](https://dakshtrehan.github.io/promptdrift/concepts/verdicts/)
+* Recipes: [model upgrade](https://dakshtrehan.github.io/promptdrift/recipes/model-upgrade/), [prompt edit](https://dakshtrehan.github.io/promptdrift/recipes/prompt-edit/), [provider switch](https://dakshtrehan.github.io/promptdrift/recipes/provider-switch/), [CI gating](https://dakshtrehan.github.io/promptdrift/recipes/ci-gating/), [pytest plugin](https://dakshtrehan.github.io/promptdrift/recipes/pytest/), [watch mode](https://dakshtrehan.github.io/promptdrift/recipes/watch/)
+* Reference: [CLI](https://dakshtrehan.github.io/promptdrift/reference/cli/), [file formats](https://dakshtrehan.github.io/promptdrift/reference/formats/), [GitHub Action](https://dakshtrehan.github.io/promptdrift/reference/action/), [Python API](https://dakshtrehan.github.io/promptdrift/reference/api/)
+
+Runnable examples live in [examples/](examples/README.md): the offline scenario (`bash examples/offline/run.sh`), a Python API script, a scripted live provider and CI samples. Every documented offline command is executed by the test suite.
+
+## Benchmark: how good is TF-IDF drift, honestly?
+
+`benchmark/` scores promptdrift's default similarity on 200 balanced pairs from the MRPC paraphrase set (full numbers and the hardest pairs in [benchmark/RESULTS.md](benchmark/RESULTS.md)):
+
+| Method | Pairs | AUC | Accuracy at best threshold | Mean drift, paraphrase | Mean drift, not paraphrase | Time per pair |
+|---|---|---|---|---|---|---|
+| TF-IDF (default) | 200 | 0.79 | 73.5% at drift 0.315 | 0.25 | 0.40 | 0.02 ms |
+
+So TF-IDF separates paraphrases from non-paraphrases better than chance but far from perfectly: it is a cheap, deterministic "did anything change" detector suited to CI gating, not a paraphrase detector. Use checks, noise floors, the judge or `--similarity embedding` for meaning, and do not carry thresholds between the TF-IDF and embedding scales. The optional sentence-transformers leg of the benchmark could not download its model in the environment where these numbers were produced, so there is no head-to-head embedding column yet; `python benchmark/run_benchmark.py` fills it in on a machine with Hugging Face access.
+
+## Limits and caveats
+
+* TF-IDF similarity is lexical: it calls a faithful paraphrase "drift" and can miss a meaning flip that keeps the same words. Use checks for facts that must hold and the judge or embeddings for meaning.
+* An LLM judge is a model with its own biases. Running both orders exposes position bias; it does not remove other biases. Inconsistent cases are excluded from the regression count rather than guessed.
+* Bootstrap intervals assume cases are independent and representative; they say nothing about cases you did not include, and the percentile bootstrap is a little too narrow for very small samples.
+* The GitHub Action has been exercised against a mocked runner and a fake GitHub API in this repository's tests; the dogfood workflow is its first run on a real runner.
+* Offline mode with no judge makes no network calls at all. Live mode and `--judge` call the provider and cost money.
+
+## Backward compatibility
+
+Everything that worked with v0.2.0 still works: the public names in `promptdrift` and the submodules, every CLI flag, the JSON report layout, and the `CaseResult` / `DiffReport` field order (new fields were appended with defaults). The v0.1.1 private helpers `promptdrift.compare._tfidf_similarity` and `promptdrift.compare._judge` remain as aliases of `promptdrift.similarity.tfidf_similarity` and `promptdrift.judge.judge_pair`. See [CHANGELOG.md](CHANGELOG.md).
+
+## Config and CLI reference
 
 ```yaml
 version: v1                  # required, used in report headers
 provider: openai             # required: openai | anthropic | ollama
 model: gpt-4o-mini           # required
 prompt_template: "{input}"   # required, {input} is replaced with each test case
-
 system: ""                   # optional system prompt
 temperature: 0.0             # optional, default 0.0 (ignored by models that reject it)
 max_tokens: 1024             # optional, default 1024
 embedding_model: "..."       # optional; setting it turns on embedding similarity
-provider_options: {}         # optional extra provider arguments
+provider_options: {}         # optional extra provider arguments (for example base_url)
 ```
-
-Templates with other literal braces (for example a JSON example) are fine: only `{input}` is substituted.
-
-## CLI reference
 
 ```text
 promptdrift compare A.yaml B.yaml --cases FILE [options]
 promptdrift diff OUTPUTS.jsonl [--name-a A] [--name-b B] [--judge] [options]
+promptdrift watch [--interval S] [--clear] [--once] {compare|diff} ...
 promptdrift init [--dir ./prompts]
 promptdrift --version
 ```
 
 | Option | Applies to | Meaning |
 |---|---|---|
-| `--no-judge` | compare | Skip the judge |
-| `--judge` | diff | Run the judge (calls a model) |
-| `--judge-provider`, `--judge-model` | both | Choose the judge |
-| `--judge-single-order` | both | Judge A-vs-B only |
+| `--no-judge` / `--judge` | compare / diff | Skip the judge / run it offline (calls a model) |
+| `--judge-provider`, `--judge-model`, `--judge-single-order` | both | Choose the judge, or judge A-vs-B only |
 | `--similarity tfidf\|embedding` | compare | Similarity backend (default tfidf) |
 | `--samples N`, `-n N` | compare | Samples per side per case |
 | `--checks FILE` | both | Default checks for cases without their own |
 | `--bootstrap N`, `--seed S` | both | Bootstrap resamples (0 disables) and seed |
 | `--json`, `-o FILE` | both | Print JSON / save the JSON report |
+| `--html FILE`, `--csv FILE`, `--junit FILE` | both | Self-contained HTML, CSV and JUnit XML reports |
 | `--summary`, `--show-outputs` | both | Less or more per-case detail |
 | `--fail-on-regression` | both | Exit 1 if any regression is found |
+| `--max-drift X`, `--max-regressions N`, `--max-format-changes N`, `--max-flips N` | both | Threshold gates, one stderr line per breach, exit 1 |
 
-## JSON report
-
-`report.to_dict()` (or `--json`) contains `version_a`, `version_b`, `model_a`, `model_b`, `total_cases`, `mode` (`live` or `offline`), `similarity`, a `summary` and the per-case results. `summary` holds `avg_drift`, `regression_rate`, `regressions`, `improvements`, `neutral` (all as in v0.1.1) plus `structural`, `checks`, `judge`, `stability` and `ci`. Sections that do not apply are `null`.
-
-A case is a **regression** when the judge says `regressed` or a check goes from pass to fail. It is an **improvement** when the judge says `improved` or a check goes from fail to pass, and it is not a regression.
-
----
-
-## Python API
-
-Everything from v0.1.1 still works. The main entry points:
-
-```python
-from promptdrift import (compare, compare_outputs, load_outputs, load_config, load_cases,
-                         print_report, save_report, print_json, DiffReport, CaseResult)
-
-from promptdrift.similarity import tfidf_similarity, text_similarity
-from promptdrift.structure import format_signature, signature_string, structural_diff
-from promptdrift.checks import normalize_checks, run_checks
-from promptdrift.judge import judge_pair, judge_both_orders, resolve_judge
-from promptdrift.stats import bootstrap_ci
-from promptdrift.scoring import score_case
-```
-
-```python
-report = compare_outputs("outputs.jsonl")
-print(report.regression_rate, report.confidence_intervals()["regression_rate"])
-for c in report.regressions:
-    print(c.case_id, c.check_flip, c.judge_verdict, c.signature_a, "->", c.signature_b)
-```
-
-If you imported the v0.1.1 private helpers `promptdrift.compare._tfidf_similarity` or `promptdrift.compare._judge`, they still work, but switch to `promptdrift.similarity.tfidf_similarity` and `promptdrift.judge.judge_pair`.
-
----
-
-## Limitations
-
-* TF-IDF similarity is lexical. It will call a faithful paraphrase "drift" and can miss a meaning flip that keeps the same words ("is" vs "is not"). Use checks for facts that must hold, and the judge or embeddings for meaning.
-* An LLM judge is itself a model with biases. Running both orders exposes position bias but does not remove other biases. Order-inconsistent cases are excluded from the regression count rather than guessed.
-* Bootstrap intervals assume cases are independent and representative. They say nothing about cases you did not include.
-* Live mode makes `2 x samples x cases` generation calls, plus up to `2 x cases` judge calls. Offline mode with no judge makes none.
-
----
-
-## Roadmap
-
-* HTML diff report with side-by-side view
-* Reusable GitHub Action wrapper
-* Google Gemini provider
-* CSV report export
-* Per-run cost tracking
-
-See [CHANGELOG.md](CHANGELOG.md) for what shipped.
-
----
+Providers: `openai` (needs `OPENAI_API_KEY`), `anthropic` (needs `ANTHROPIC_API_KEY`, SDK 1.x or 2.x; sampling parameters are sent only to Claude models before 4.7, see `provider_options.temperature_supported`), `ollama` (local server at `http://localhost:11434`).
 
 ## Contributing
 
-PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). The test suite needs no API keys and makes no network calls.
+PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md): `ruff check .`, `python -m mypy promptdrift` and `pytest --cov` must pass, the suite needs no API keys and makes no network calls, and judgement calls go in [DECISIONS.md](DECISIONS.md).
 
----
+## License
 
-## Author
-
-Built by [Daksh Trehan](https://dakshtrehan.com). FDE at [Abacus.AI](https://abacus.ai), 6x Snowflake certified, 50+ articles on Towards Data Science.
+MIT. Built by [Daksh Trehan](https://dakshtrehan.com).
 
 > "I built this because I kept breaking my prompts in prod and had no clean way to catch it."
-
----
-
-<div align="center">
-
-⭐ If promptdrift saves you from a silent regression, give it a star.
-
-</div>
