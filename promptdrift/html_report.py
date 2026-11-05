@@ -536,7 +536,8 @@ table.checks,table.tags{{width:auto;min-width:50%}}
 .controls{{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 12px}}.controls input[type=search]{{flex:1;min-width:160px}}
 .js-only{{display:none}}.js .js-only{{display:inline-block}}.js .controls.js-only{{display:flex}}.js p.js-only{{display:block}}
 footer{{margin:36px 0 12px;border-top:1px solid var(--border);padding-top:12px}}
-@media (max-width:720px){{.ci{{grid-template-columns:1fr;gap:4px}}.diff{{grid-template-columns:1fr}}main{{padding:12px}}.card .value{{font-size:20px}}th,td{{padding:6px}}}}
+@media (max-width:720px){{.ci{{grid-template-columns:1fr;gap:4px}}.diff{{grid-template-columns:1fr}}main{{padding:12px}}.card .value{{font-size:20px}}th,td{{padding:6px}}
+.detail-body{{position:sticky;left:0;max-width:calc(100vw - 40px)}}.detail-body table{{display:block;overflow-x:auto;min-width:0}}}}
 """  # noqa: E501
 
 _HEAD_JS = ("(function(){var d=document.documentElement;d.className+=' js';"
