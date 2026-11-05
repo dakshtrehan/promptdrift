@@ -485,3 +485,64 @@ So that parallel work fits together, these names were fixed in advance:
   `-p no:promptdrift`). Hardening should either run coverage with
   `coverage run -m pytest`, pass `-p no:promptdrift` in CI, or make the plugin
   module import `promptdrift` lazily.
+
+## D-C. Workstream C: watch mode, pytest plugin and assert_no_regressions
+
+* `promptdrift watch [--interval S] [--clear] [--once] <compare|diff> <args...>`
+  reuses the real `compare` and `diff` subparsers: `cmd_watch` re-parses the
+  wrapped arguments with the main parser, so every flag the other workstreams
+  add (thresholds, exports) works under `watch` with no extra wiring. Watched
+  inputs are the config files, the cases file and the checks file for
+  `compare`, and the outputs file plus the checks file for `diff`; output
+  files are never watched, so a run cannot trigger itself.
+* The watcher in `promptdrift.watch` polls `(mtime_ns, size)` per file
+  (default 1.0 s, floored at 0.05 s) and treats missing files as "watched for
+  creation". When `watchdog` is importable (optional extra `watch`, not a
+  dependency) it only wakes the loop early; what changed is still decided from
+  the poll snapshot, so both backends behave identically and the watchdog path
+  is tested with a fake module instead of a real observer.
+* Each run goes through `run_wrapped`, which turns `sys.exit` inside the
+  wrapped command into a return code shown in the status line
+  (`watch [HH:MM:SS] diff finished in 0.42s, exit 1`). In continuous mode the
+  process never exits on regressions and Ctrl-C returns 0; with `--once` the
+  wrapped command's exit code is propagated so `watch --once` can stand in
+  for the plain command in scripts and tests.
+* The cost warning ("watch re-runs call the model on every change; use
+  --no-judge or offline diff to limit cost") is printed for every `compare`
+  (generation itself calls the model even with `--no-judge`) and for
+  `diff --judge`; plain `diff` prints nothing because it calls no model.
+* The pytest plugin logic lives in `promptdrift.pytest_plugin` as D13 says, but
+  the `pytest11` entry point points at a top-level shim module
+  `_promptdrift_pytest` (shipped through `py-modules`). Pointing the entry
+  point straight at the package module imported all of promptdrift at every
+  pytest start-up, before pytest-cov begins measuring, and dropped this repo's
+  own coverage from 99 to 81 percent because every definition line was
+  executed before coverage started. The shim imports the real plugin only when
+  `--promptdrift*` or `--help` is in the arguments (including `addopts` and
+  `PYTEST_ADDOPTS`); pytest replays the historic `pytest_addoption` and
+  `pytest_configure` hooks for the late registration, and
+  `-p promptdrift.pytest_plugin` or `pytest_plugins = [...]` still work because
+  `import_plugin` skips an already registered module. This follows the
+  precedent of Hypothesis's `_hypothesis_pytestplugin`. The shim also defines
+  the `promptdrift_report` fixture so it returns `None` instead of raising a
+  missing fixture error without the option.
+* Items are added in `pytest_collection_modifyitems` with `tryfirst=True`, as
+  children of a `pytest.File` collector per outputs file with nodeid
+  `promptdrift::<file as given>`, so `-m promptdrift`, `-m "not promptdrift"`,
+  `-k` and `--junit-xml` (classname `promptdrift.<file>`) treat them like any
+  other test. Regression items fail with `PromptdriftRegression`, whose
+  message is printed as is (no traceback); unexpected exceptions keep the
+  default pytest rendering. `--promptdrift-max-drift` and
+  `--promptdrift-max-regressions` apply to the per-file `summary` item through
+  `evaluate_thresholds`, so the CLI, the Action and the plugin agree on what
+  "exceeded" means. With several `--promptdrift` files, `--promptdrift-json`
+  and `--promptdrift-html` write numbered files (`report-1.json`,
+  `report-2.json`); a single file keeps the path as given.
+* `promptdrift.testing.assert_no_regressions` builds on
+  `promptdrift.thresholds.evaluate_thresholds` (workstream A landed first), so
+  `max_flips` counts pass-to-fail flips only, matching the CLI. It is exported
+  from `promptdrift.__init__` and appended to `__all__`.
+* Verified: the plugin tests pass on pytest 7.4.4, 8.3.5 and 9.2.0 (throwaway
+  venvs in the scratchpad, package installed with `--no-deps`); `pytest --help`
+  lists the six options through the entry point; the whole suite runs no
+  model call and the two new test files take under two seconds.
