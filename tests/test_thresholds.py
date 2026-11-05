@@ -47,7 +47,7 @@ def test_limits_are_inclusive():
     rep = report()
     assert evaluate_thresholds(rep, max_regressions=1, max_format_changes=1, max_flips=1,
                                max_drift=1.0) == []
-    assert evaluate_thresholds(rep, max_drift=rep.avg_drift) == []
+    assert evaluate_thresholds(rep, max_drift=round(rep.avg_drift, 4)) == []
 
 
 def test_dict_form_matches_report_form():
@@ -115,3 +115,61 @@ def test_compare_parser_has_threshold_flags():
                        "--max-format-changes", "2", "--max-flips", "3"])
     assert (ns.max_drift, ns.max_regressions, ns.max_format_changes, ns.max_flips) == (0.2, 1, 2, 3)
     assert p.parse_args([]).max_drift is None
+
+
+# ── review fixes ──────────────────────────────────────────────────────────────
+def _uneven_report():
+    """Three cases whose mean drift does not round cleanly to 4 decimals."""
+    cases = [CaseResult(str(i), "i", "a", "b", 1 - d, d, "minor")
+             for i, d in enumerate((0.2, 0.2215, 0.244))]
+    rep = DiffReport("a", "b", "m", "m", 3, cases, n_bootstrap=0)
+    assert rep.avg_drift != round(rep.avg_drift, 4)
+    return rep
+
+
+@pytest.mark.parametrize("delta", [0.0, 0.00004, -0.00004, 0.0001, -0.0001])
+def test_report_and_dict_form_gate_the_same_number(delta):
+    rep = _uneven_report()
+    limit = round(rep.avg_drift, 4) + delta
+    assert evaluate_thresholds(rep, max_drift=limit) == \
+        evaluate_thresholds(rep.to_dict(), max_drift=limit)
+    assert evaluate_thresholds(rep, max_drift=limit) == \
+        evaluate_thresholds(json.loads(rep.to_json()), max_drift=limit)
+
+
+def test_failure_sentence_never_prints_equal_numbers():
+    assert evaluate_thresholds({"summary": {"avg_drift": 0.1004}}, max_drift=0.10) == \
+        ["avg drift 10.04% exceeds max-drift 10.00%"]
+    assert evaluate_thresholds({"summary": {"avg_drift": 0.1001}}, max_drift=0.10009) == \
+        ["avg drift 10.010% exceeds max-drift 10.009%"]
+    # the usual case keeps the one decimal wording
+    assert evaluate_thresholds({"summary": {"avg_drift": 0.123}}, max_drift=0.1) == \
+        ["avg drift 12.3% exceeds max-drift 10.0%"]
+
+
+@pytest.mark.parametrize("bad", [10, 15.0, -0.1, 1.0001, float("nan"), float("inf")])
+def test_max_drift_outside_0_to_1_is_rejected(bad):
+    with pytest.raises(ValueError, match="fraction between 0 and 1"):
+        evaluate_thresholds({"summary": {"avg_drift": 0.5}}, max_drift=bad)
+
+
+def test_max_drift_boundaries_are_accepted():
+    data = {"summary": {"avg_drift": 0.5}}
+    assert evaluate_thresholds(data, max_drift=1.0) == []
+    assert evaluate_thresholds(data, max_drift=0.0) == ["avg drift 50.0% exceeds max-drift 0.0%"]
+    assert evaluate_thresholds(data, max_drift=None) == []
+
+
+@pytest.mark.parametrize("bad", ["10", "-0.1", "nan", "inf", "x"])
+def test_cli_rejects_max_drift_in_percent(outputs_file, capsys, bad):
+    with pytest.raises(SystemExit) as e:
+        main(["diff", outputs_file, "--summary", "--max-drift", bad])
+    assert e.value.code == 2
+    assert "fraction between 0 and 1" in capsys.readouterr().err
+
+
+def test_assert_no_regressions_rejects_max_drift_in_percent():
+    from promptdrift import assert_no_regressions
+
+    with pytest.raises(ValueError, match="fraction"):
+        assert_no_regressions(report(), max_drift=10, max_regressions=99)

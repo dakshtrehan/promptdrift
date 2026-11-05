@@ -28,6 +28,7 @@ import os
 import sys
 import threading
 import time
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence, TextIO, Union
@@ -173,8 +174,14 @@ def watch_files(
     return runs
 
 
-def run_wrapped(func: Callable[[], object]) -> int:
-    """Call ``func`` and turn ``sys.exit`` into a return code instead of exiting."""
+def run_wrapped(func: Callable[[], object], err: Optional[TextIO] = None) -> int:
+    """Call ``func`` and turn ``sys.exit`` into a return code instead of exiting.
+
+    Any other ``Exception`` (a half-saved YAML file, a path that became a
+    directory) is printed as one line on ``err`` (stderr by default) and
+    returns 1, so the watch loop keeps running. ``KeyboardInterrupt`` is not
+    an ``Exception`` and still stops the loop.
+    """
     try:
         func()
     except SystemExit as e:
@@ -183,6 +190,12 @@ def run_wrapped(func: Callable[[], object]) -> int:
             return 0
         if isinstance(code, int):
             return code
+        return 1
+    except Exception as e:
+        stream = err if err is not None else sys.stderr
+        msg = "".join(traceback.format_exception_only(type(e), e)).strip()
+        stream.write(f"  watch error: {' '.join(msg.split())}\n")
+        stream.flush()
         return 1
     return 0
 

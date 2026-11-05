@@ -24,9 +24,13 @@ can be gated without rebuilding the report.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Mapping, Optional, Union
 
 from .core import DiffReport
+
+#: Decimal places of ``summary.avg_drift`` in ``DiffReport.to_dict()``.
+DRIFT_DIGITS = 4
 
 
 def _summary_counts(report: Union[DiffReport, Mapping[str, Any]]) -> dict[str, Any]:
@@ -34,7 +38,9 @@ def _summary_counts(report: Union[DiffReport, Mapping[str, Any]]) -> dict[str, A
     if isinstance(report, DiffReport):
         checks = report.checks_summary()
         return {
-            "avg_drift": report.avg_drift,
+            # gate on the same rounded number that report.json carries, so the
+            # CLI and a re-evaluation of the saved report always agree
+            "avg_drift": round(report.avg_drift, DRIFT_DIGITS),
             "regressions": len(report.regressions),
             "format_changes": len(report.format_changes),
             "flips": checks["pass_to_fail"] if checks else 0,
@@ -50,8 +56,34 @@ def _summary_counts(report: Union[DiffReport, Mapping[str, Any]]) -> dict[str, A
     }
 
 
-def _pct(v: float) -> str:
-    return f"{round(v * 100, 1)}%"
+def _pct_pair(value: float, limit: float) -> tuple[str, str]:
+    """Format a measured value and its limit as percentages that never look equal.
+
+    One decimal is used normally; when that would print the same number for
+    both (10.04 percent against a 10 percent limit), more decimals are added.
+    """
+    for digits in range(1, 7):
+        a, b = f"{value * 100:.{digits}f}%", f"{limit * 100:.{digits}f}%"
+        if a != b:
+            break
+    if digits == 1:
+        return f"{round(value * 100, 1)}%", f"{round(limit * 100, 1)}%"
+    return a, b
+
+
+def check_max_drift(max_drift: Optional[float]) -> Optional[float]:
+    """Validate a ``max_drift`` limit: a fraction from 0.0 to 1.0, or None.
+
+    Raises ``ValueError`` for anything else, including NaN, infinity and a
+    value given in percent such as ``10``, which could otherwise never fail.
+    """
+    if max_drift is None:
+        return None
+    value = float(max_drift)
+    if math.isnan(value) or not (0.0 <= value <= 1.0):
+        raise ValueError(f"max-drift is a fraction between 0 and 1 (10 percent is 0.1), "
+                         f"got {max_drift!r}")
+    return value
 
 
 def evaluate_thresholds(
@@ -78,15 +110,23 @@ def evaluate_thresholds(
             existing ``--fail-on-regression`` message stays recognisable.
 
     Each sentence names the measured value and the limit, for example
-    ``"avg drift 12.3% exceeds max-drift 10.0%"``. Gates with ``None`` are
-    skipped, so calling with no limits always returns ``[]``.
+    ``"avg drift 12.3% exceeds max-drift 10.0%"`` (more decimals are shown
+    when one would print the same number twice). Gates with ``None`` are
+    skipped, so calling with no limits always returns ``[]``. The average drift
+    is compared after rounding to 4 decimals, the precision of ``report.json``,
+    so a ``DiffReport`` and its ``to_dict()`` form give the same answer.
+
+    Raises:
+        ValueError: ``max_drift`` is not a fraction from 0.0 to 1.0 (a value
+            in percent such as ``10``, a negative number, NaN or infinity).
     """
+    max_drift = check_max_drift(max_drift)
     counts = _summary_counts(report)
     failures: list[str] = []
 
     if max_drift is not None and counts["avg_drift"] > max_drift:
-        failures.append(
-            f"avg drift {_pct(counts['avg_drift'])} exceeds max-drift {_pct(max_drift)}")
+        measured, limit = _pct_pair(counts["avg_drift"], max_drift)
+        failures.append(f"avg drift {measured} exceeds max-drift {limit}")
     if fail_on_regression and counts["regressions"] > 0:
         failures.append(
             f"{counts['regressions']} regression(s) found and fail-on-regression is set")

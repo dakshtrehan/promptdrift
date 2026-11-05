@@ -45,3 +45,66 @@ def test_broken_pipe_keeps_threshold_exit_code(big_outputs):
     assert proc.returncode == 1, proc.stderr
     assert "exceed max-regressions" in proc.stderr
     assert "BrokenPipeError" not in proc.stderr
+
+
+# ── closed stdout (``cmd >&-``, cron wrappers, pythonw) ────────────────────────
+def _run_closed_stdout(args):
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    cmd = f"{sys.executable} -m promptdrift.cli {args} >&-"
+    return subprocess.run(
+        ["bash", "-c", cmd], capture_output=False, stderr=subprocess.PIPE, text=True,
+        cwd=root, env={"PATH": "/usr/bin:/bin", "OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": ""},
+    )
+
+
+def test_closed_stdout_keeps_exit_code_zero(tmp_path):
+    out = tmp_path / "report.json"
+    proc = _run_closed_stdout(f"diff examples/outputs.jsonl --bootstrap 0 --output {out}")
+    assert proc.returncode == 0, proc.stderr
+    assert "AttributeError" not in proc.stderr and "Traceback" not in proc.stderr
+    assert json.loads(out.read_text())["total_cases"] >= 1
+
+
+def test_closed_stdout_keeps_an_intended_exit_1(tmp_path):
+    out = tmp_path / "report.json"
+    proc = _run_closed_stdout(
+        f"diff examples/outputs.jsonl --bootstrap 0 --output {out} --fail-on-regression")
+    assert proc.returncode == 1 and "Traceback" not in proc.stderr
+    assert out.exists()
+
+
+def test_flush_guard_handles_none_and_closed_stdout(monkeypatch):
+    import io
+
+    from promptdrift import cli
+
+    monkeypatch.setattr(sys, "stdout", None)
+    cli._flush_stdout_quietly()  # no AttributeError
+
+    class Closed(io.StringIO):
+        def flush(self):
+            raise ValueError("I/O operation on closed file.")
+
+        def fileno(self):
+            raise ValueError("I/O operation on closed file.")
+
+    monkeypatch.setattr(sys, "stdout", Closed())
+    cli._flush_stdout_quietly()  # ValueError from flushing a closed file is swallowed
+
+
+# ── --json keeps stdout one JSON document ─────────────────────────────────────
+def test_json_mode_sends_saved_lines_to_stderr(tmp_path, capsys):
+    from pathlib import Path
+
+    from promptdrift.cli import main
+
+    example = Path(__file__).resolve().parents[1] / "examples" / "outputs.jsonl"
+    main(["diff", str(example), "--json", "--bootstrap", "0",
+          "-o", str(tmp_path / "r.json"), "--html", str(tmp_path / "r.html"),
+          "--csv", str(tmp_path / "r.csv"), "--junit", str(tmp_path / "r.xml")])
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["total_cases"] >= 1  # nothing after the document
+    for line in ("Report saved", "HTML report saved", "CSV saved", "JUnit XML saved"):
+        assert line in captured.err and line not in captured.out

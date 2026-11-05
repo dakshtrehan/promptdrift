@@ -47,6 +47,8 @@ dev = [
     "twine>=5.0",
     "openai>=1.0",
     "anthropic>=0.20",
+    # parses the PR comment Markdown in tests/test_markdown.py
+    "markdown-it-py>=3.0",
 ]
 
 [project.urls]
@@ -86,7 +88,8 @@ select = ["E", "F", "W", "I", "B"]
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["promptdrift", "action"]
+# _promptdrift_pytest is the pytest11 shim that every pytest run imports
+source = ["promptdrift", "action", "_promptdrift_pytest"]
 
 [tool.coverage.report]
 fail_under = 90

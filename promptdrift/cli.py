@@ -71,8 +71,10 @@ def _emit(report: DiffReport, args: argparse.Namespace) -> None:
         # but still write the files and evaluate the gates so the exit code holds.
         _silence_stdout()
 
+    # In --json mode stdout carries only the JSON document; status lines go to stderr.
+    status = sys.stderr if getattr(args, "json", False) else None
     if args.output:
-        save_report(report, args.output)
+        save_report(report, args.output, stream=status)
     _emit_exports(report, args)
 
     # Threshold gates (--max-drift and friends): one line per breach on stderr, exit 1.
@@ -107,18 +109,19 @@ def _emit_exports(report: DiffReport, args: argparse.Namespace) -> None:
     html_path = getattr(args, "html", None)
     csv_path = getattr(args, "csv", None)
     junit_path = getattr(args, "junit", None)
+    stream = sys.stderr if getattr(args, "json", False) else sys.stdout
     if html_path:
         from .html_report import save_html
         save_html(report, html_path)
-        print(f"  {GRN}✓{R} HTML report saved → {BOLD}{html_path}{R}")
+        print(f"  {GRN}✓{R} HTML report saved → {BOLD}{html_path}{R}", file=stream)
     if csv_path:
         from .export import save_csv
         save_csv(report, csv_path)
-        print(f"  {GRN}✓{R} CSV saved → {BOLD}{csv_path}{R}")
+        print(f"  {GRN}✓{R} CSV saved → {BOLD}{csv_path}{R}", file=stream)
     if junit_path:
         from .export import save_junit
         save_junit(report, junit_path)
-        print(f"  {GRN}✓{R} JUnit XML saved → {BOLD}{junit_path}{R}")
+        print(f"  {GRN}✓{R} JUnit XML saved → {BOLD}{junit_path}{R}", file=stream)
 
 
 def cmd_diff(args: argparse.Namespace) -> None:
@@ -144,6 +147,12 @@ def cmd_diff(args: argparse.Namespace) -> None:
         sys.exit(1)
     except ValueError as e:
         print(f"\n  ✗ Input error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n  ✗ Error: {e}", file=sys.stderr)
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
         sys.exit(1)
 
     _emit(report, args)
@@ -234,7 +243,11 @@ def _load_checks(path: Optional[str]) -> Any:
     with open(path) as f:
         if str(path).lower().endswith((".yaml", ".yml")):
             import yaml
-            spec = yaml.safe_load(f)
+            try:
+                spec = yaml.safe_load(f)
+            except yaml.YAMLError as e:
+                # a ValueError, so a half-saved file is a one line input error
+                raise ValueError(f"{path}: invalid YAML: {_one_line(e)}") from e
         else:
             spec = json.load(f)
     normalize_checks(spec, expected="")  # validate early; 'exact' may use each case's expected
@@ -269,7 +282,7 @@ def _add_output_args(p: argparse.ArgumentParser) -> None:
                    help="Show truncated A/B outputs per case")
     p.add_argument("--fail-on-regression", action="store_true",
                    help="Exit 1 if regressions found (CI)")
-    p.add_argument("--max-drift", type=float, default=None, metavar="X",
+    p.add_argument("--max-drift", type=_fraction, default=None, metavar="X",
                    help="Exit 1 when average drift exceeds X (fraction, e.g. 0.1 for 10%%)")
     p.add_argument("--max-regressions", type=int, default=None, metavar="N",
                    help="Exit 1 when more than N cases regressed")
@@ -358,6 +371,23 @@ examples:
         _flush_stdout_quietly()
 
 
+def _one_line(e: BaseException) -> str:
+    return " ".join(str(e).split())
+
+
+def _fraction(text: str) -> float:
+    """argparse type for ``--max-drift``: a fraction from 0.0 to 1.0."""
+    from .thresholds import check_max_drift
+
+    try:
+        value = check_max_drift(float(text))
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"must be a fraction between 0 and 1 (10 percent is 0.1), got {text!r}") from None
+    assert value is not None
+    return value
+
+
 def _flush_stdout_quietly() -> None:
     """Flush stdout, and swallow a broken pipe (``promptdrift ... | head``).
 
@@ -365,9 +395,12 @@ def _flush_stdout_quietly() -> None:
     exits with status 120, which turns a clean run into a CI failure. The
     exit code chosen by the command (0, or 1 for a threshold breach) is kept.
     """
+    out = sys.stdout
+    if out is None:  # started with fd 1 closed (``cmd >&-``, pythonw): nothing to flush
+        return
     try:
-        sys.stdout.flush()
-    except (BrokenPipeError, OSError):
+        out.flush()
+    except (BrokenPipeError, OSError, ValueError):
         _silence_stdout()
 
 

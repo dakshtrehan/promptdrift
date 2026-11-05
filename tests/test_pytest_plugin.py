@@ -301,3 +301,43 @@ def test_describe_case_without_checks_or_format_change():
     text = describe_case(_case("plain", "a\nb", "c"))
     assert text.splitlines() == ["case plain", "  drift:  0.5000 (moderate)",
                                  "  judge:  not judged", "  A: a b", "  B: c"]
+
+
+# ── review fixes ───────────────────────────────────────────────────────────────
+
+def test_collected_count_includes_generated_items(pytester):
+    f = _write(pytester)
+    pytester.makepyfile("def test_plain():\n    assert True\n")
+    result = _run(pytester, "--promptdrift", f)
+    result.stdout.fnmatch_lines(["collected 5 items*"])
+    result.assert_outcomes(passed=3, failed=2)
+    co = _run(pytester, "--co", "-q", "--promptdrift", f)
+    co.stdout.fnmatch_lines(["5 tests collected*"])
+
+
+def test_marker_deselection_count_is_not_negative(pytester):
+    f = _write(pytester)
+    pytester.makepyfile("def test_plain():\n    assert True\n")
+    result = _run(pytester, "--promptdrift", f, "-m", "not promptdrift")
+    result.stdout.fnmatch_lines(["collected 5 items / 4 deselected / 1 selected*"])
+    result.assert_outcomes(passed=1, deselected=4)
+
+
+def test_fixture_works_with_explicit_plugin_flag(pytester):
+    """With -p promptdrift.pytest_plugin the shim's fixture wins and must build the report."""
+    f = _write(pytester, [ROWS[0]])
+    pytester.makepyfile(textwrap.dedent("""
+        def test_fixture_has_report(promptdrift_report):
+            assert promptdrift_report is not None
+            assert [c.case_id for c in promptdrift_report.cases] == ["good"]
+    """))
+    result = _run(pytester, "-p", "promptdrift.pytest_plugin", "--promptdrift", f)
+    result.assert_outcomes(passed=3)
+
+
+@pytest.mark.parametrize("bad", ["10", "-0.5", "nan"])
+def test_max_drift_option_must_be_a_fraction(pytester, bad):
+    f = _write(pytester, [ROWS[0]])
+    result = _run(pytester, "--promptdrift", f, "--promptdrift-max-drift", bad)
+    assert result.ret != 0
+    assert "fraction between 0 and 1" in result.stderr.str()

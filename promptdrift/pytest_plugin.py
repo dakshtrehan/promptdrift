@@ -31,6 +31,7 @@ from typing import Any, Iterator, Optional, Union
 
 import pytest
 
+from .cli import _fraction
 from .core import CaseResult, DiffReport
 from .export import failure_reason
 from .testing import describe_case
@@ -51,7 +52,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--promptdrift", action="append", default=[], metavar="PATH",
                     help="JSONL/JSON outputs file to score offline (repeatable); "
                          "adds one test per case plus a summary test per file")
-    group.addoption("--promptdrift-max-drift", type=float, default=None, metavar="FLOAT",
+    group.addoption("--promptdrift-max-drift", type=_fraction, default=None, metavar="FLOAT",
                     help="fail the summary test when average drift exceeds this (0.0 to 1.0)")
     group.addoption("--promptdrift-max-regressions", type=int, default=0, metavar="INT",
                     help="fail the summary test when regressions exceed this (default 0)")
@@ -225,7 +226,13 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
     for f, report in build_reports(config):
         collector = PromptdriftFile.from_parent(
             session, path=Path(f).resolve(), nodeid=f"promptdrift::{f}", report=report)
-        items.extend(collector.collect())
+        generated = list(collector.collect())
+        # Report the generated items as collected so the "collected N items"
+        # header, --collect-only and -k/-m "selected" counts include them.
+        result: list[Union[pytest.Item, pytest.Collector]] = list(generated)
+        session.ihook.pytest_collectreport(
+            report=pytest.CollectReport(collector.nodeid, "passed", None, result))
+        items.extend(generated)
 
 
 @pytest.fixture

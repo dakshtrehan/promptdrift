@@ -3,6 +3,8 @@ Terminal and JSON reporting.
 """
 from __future__ import annotations
 
+from typing import Optional, TextIO
+
 from .core import DiffReport
 from .version import __version__
 
@@ -239,7 +241,12 @@ def print_json(report: DiffReport) -> None:
     print(report.to_json())
 
 
-def save_report(report: DiffReport, path: str) -> None:
+def save_report(report: DiffReport, path: str, *, stream: Optional[TextIO] = None) -> None:
+    """Write ``report.to_json()`` to ``path`` and print a status line.
+
+    The status line goes to ``stream`` (stdout by default); the CLI passes
+    stderr in ``--json`` mode so stdout stays one valid JSON document.
+    """
     with open(path, "w") as f:
         f.write(report.to_json())
-    print(f"  {GRN}✓{R} Report saved → {BOLD}{path}{R}")
+    print(f"  {GRN}✓{R} Report saved → {BOLD}{path}{R}", file=stream)

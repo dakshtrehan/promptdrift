@@ -344,3 +344,72 @@ def test_cli_watch_continuous_mode_stops_on_ctrl_c(capsys, monkeypatch):
     main(["watch", "diff", str(EXAMPLE), "--summary"])      # returns, exit code 0
     out = capsys.readouterr().out
     assert "stopped" in out
+
+
+# ── review fixes: errors other than SystemExit keep the loop alive ────────────
+
+def test_run_wrapped_turns_an_exception_into_exit_1():
+    err = io.StringIO()
+
+    def boom():
+        raise RuntimeError("half\nsaved")
+    assert run_wrapped(boom, err=err) == 1
+    assert err.getvalue() == "  watch error: RuntimeError: half saved\n"
+
+
+def test_run_wrapped_writes_to_stderr_by_default(capsys):
+    assert run_wrapped(lambda: [][1]) == 1
+    assert "watch error: IndexError" in capsys.readouterr().err
+
+
+def test_run_wrapped_lets_ctrl_c_through():
+    def interrupt():
+        raise KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        run_wrapped(interrupt)
+
+
+def test_run_watch_survives_a_half_saved_yaml_checks_file(tmp_path, capsys):
+    checks = tmp_path / "checks.yaml"
+    checks.write_text("regex: [\n")  # mid-edit: not valid YAML
+    out = io.StringIO()
+    stop = threading.Event()
+    codes = []
+
+    def func():
+        try:
+            main(["diff", str(EXAMPLE), "--summary", "--bootstrap", "0",
+                  "--checks", str(checks)])
+        except SystemExit as e:
+            codes.append(e.code)
+            if len(codes) == 1:
+                threading.Timer(0.05, lambda: checks.write_text('regex: "."\n')).start()
+            raise
+        codes.append(0)
+        stop.set()
+    code = run_watch(func, [EXAMPLE, checks], interval=0.02, stop_event=stop, out=out,
+                     backend="poll")
+    assert code == 0 and codes == [1, 0]
+    text = out.getvalue()
+    assert "exit 1" in text and "exit 0" in text and text.rstrip().endswith("stopped")
+    assert "Input error" in capsys.readouterr().err
+
+
+def test_cli_diff_invalid_yaml_checks_is_a_one_line_input_error(tmp_path, capsys):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("regex: [")
+    with pytest.raises(SystemExit) as e:
+        main(["diff", str(EXAMPLE), "--checks", str(bad)])
+    assert e.value.code == 1
+    err = capsys.readouterr().err
+    assert "Input error" in err and "invalid YAML" in err and "Traceback" not in err
+
+
+def test_cli_diff_other_errors_exit_1_without_traceback(tmp_path, capsys):
+    with pytest.raises(SystemExit) as e:
+        main(["diff", str(EXAMPLE), "--checks", str(tmp_path)])  # a directory
+    assert e.value.code == 1
+    assert "Error" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        main(["diff", str(EXAMPLE), "--checks", str(tmp_path), "--verbose"])
+    assert "Traceback" in capsys.readouterr().err
