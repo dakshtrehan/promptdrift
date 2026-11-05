@@ -5,18 +5,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, Union
 
 import yaml
 
 from .core import DiffReport
 from .judge import judge_pair, resolve_judge
-from .providers import BaseProvider, get_provider
-from .scoring import score_case
+from .providers import BaseProvider, SupportsComplete, get_provider
+from .scoring import _valid_tags, score_case
 from .similarity import text_similarity, tfidf_similarity
 
 
 # ── Config / case loaders ─────────────────────────────────────────────────────
-def load_config(path: str | Path) -> dict:
+def load_config(path: str | Path) -> dict[str, Any]:
     """
     Load a prompt config (YAML or JSON).
 
@@ -36,7 +37,8 @@ def load_config(path: str | Path) -> dict:
     """
     p = Path(path)
     with open(p) as f:
-        cfg = yaml.safe_load(f) if p.suffix in (".yaml", ".yml") else json.load(f)
+        cfg: dict[str, Any] = (yaml.safe_load(f) if p.suffix in (".yaml", ".yml")
+                               else json.load(f))
     required = ["version", "provider", "model", "prompt_template"]
     missing = [k for k in required if k not in cfg]
     if missing:
@@ -47,12 +49,13 @@ def load_config(path: str | Path) -> dict:
     return cfg
 
 
-def load_cases(path: str | Path) -> list[dict]:
+def load_cases(path: str | Path) -> list[dict[str, Any]]:
     """
     Load test cases from JSON, JSONL, or YAML.
 
     Each case needs at least 'input'. 'id' is auto-assigned if missing.
     'expected' is optional metadata, passed to the judge for context.
+    'tags' is an optional list of labels used for per-tag breakdowns.
 
     Example:
         [
@@ -76,6 +79,8 @@ def load_cases(path: str | Path) -> list[dict]:
             raise ValueError(f"Case {i}: missing 'input' field.")
         if "id" not in c:
             c["id"] = f"case_{i+1}"
+        if "tags" in c and not _valid_tags(c["tags"]):
+            raise ValueError(f"Case {i}: 'tags' must be a list of strings.")
     return cases
 
 
@@ -108,7 +113,7 @@ def render_prompt(template: str, inp: str) -> str:
 
 
 # ── Embedding provider resolution ─────────────────────────────────────────────
-def _resolve_embedder(cfg: dict) -> BaseProvider | None:
+def _resolve_embedder(cfg: dict[str, Any]) -> BaseProvider | None:
     """
     Try to build an embedding provider for the given config.
     Returns None if no embedding provider is reachable; caller should fall back to TF-IDF.
@@ -128,22 +133,22 @@ def _resolve_embedder(cfg: dict) -> BaseProvider | None:
         return None
 
 
-def cfg_embedding_requested(*configs) -> bool:
+def cfg_embedding_requested(*configs: Any) -> bool:
     """True if any already-loaded config dict sets ``embedding_model``."""
     return any(isinstance(c, dict) and c.get("embedding_model") for c in configs)
 
 
 # ── Main compare function ─────────────────────────────────────────────────────
 def compare(
-    config_a: str | Path | dict,
-    config_b: str | Path | dict,
-    cases: str | Path | list[dict],
+    config_a: str | Path | dict[str, Any],
+    config_b: str | Path | dict[str, Any],
+    cases: str | Path | list[dict[str, Any]],
     *,
     use_judge: bool = True,
-    judge_provider: str | BaseProvider | None = None,
+    judge_provider: str | SupportsComplete | None = None,
     judge_model: str | None = None,
     verbose: bool = True,
-    checks=None,
+    checks: Union[list[dict[str, Any]], dict[str, Any], None] = None,
     samples: int = 1,
     bootstrap: int = 1000,
     seed: int = 0,
@@ -209,13 +214,19 @@ def compare(
             print(f"  [{i+1}/{len(test_cases)}] {case['id']}")
 
         inp = case["input"]
-        params_a = {"temperature": cfg_a["temperature"], "max_tokens": cfg_a["max_tokens"]}
-        params_b = {"temperature": cfg_b["temperature"], "max_tokens": cfg_b["max_tokens"]}
+        # Config dicts passed directly may omit the optional fields that
+        # load_config() fills in; use the same defaults here.
+        params_a = {"temperature": cfg_a.get("temperature", 0.0),
+                    "max_tokens": cfg_a.get("max_tokens", 1024)}
+        params_b = {"temperature": cfg_b.get("temperature", 0.0),
+                    "max_tokens": cfg_b.get("max_tokens", 1024)}
 
         prompt_a = render_prompt(cfg_a["prompt_template"], inp)
         prompt_b = render_prompt(cfg_b["prompt_template"], inp)
-        resps_a = [prov_a.complete(cfg_a["system"], prompt_a, **params_a) for _ in range(samples)]
-        resps_b = [prov_b.complete(cfg_b["system"], prompt_b, **params_b) for _ in range(samples)]
+        resps_a = [prov_a.complete(cfg_a.get("system", ""), prompt_a, **params_a)
+                   for _ in range(samples)]
+        resps_b = [prov_b.complete(cfg_b.get("system", ""), prompt_b, **params_b)
+                   for _ in range(samples)]
 
         texts_a = [r.text for r in resps_a]
         texts_b = [r.text for r in resps_b]

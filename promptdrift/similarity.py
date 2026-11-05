@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from typing import TYPE_CHECKING, Optional
 
 from .core import cosine_similarity
+
+if TYPE_CHECKING:  # pragma: no cover - annotations only
+    from .providers import SupportsEmbed
 
 __all__ = ["tfidf_similarity", "embedding_similarity", "text_similarity"]
 
@@ -35,14 +39,15 @@ def tfidf_similarity(text_a: str, text_b: str) -> float:
     return cosine_similarity(vec_a, vec_b)
 
 
-def embedding_similarity(provider, text_a: str, text_b: str) -> float:
+def embedding_similarity(provider: SupportsEmbed, text_a: str, text_b: str) -> float:
     """Cosine similarity of two embeddings from ``provider.embed``. Raises on failure."""
     ea = provider.embed(text_a).vector
     eb = provider.embed(text_b).vector
     return cosine_similarity(ea, eb)
 
 
-def text_similarity(text_a: str, text_b: str, embedder=None) -> tuple[float, str]:
+def text_similarity(text_a: str, text_b: str,
+                    embedder: Optional[SupportsEmbed] = None) -> tuple[float, str]:
     """Return ``(similarity, method)``.
 
     ``method`` is ``"embedding"`` when ``embedder`` is given and succeeds, and

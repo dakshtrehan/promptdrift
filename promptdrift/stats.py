@@ -4,6 +4,7 @@ Bootstrap confidence intervals, pure Python and seeded so reports are reproducib
 from __future__ import annotations
 
 import random
+from typing import Mapping, Optional, Sequence
 
 __all__ = ["percentile", "bootstrap_ci", "bootstrap_cis"]
 
@@ -18,7 +19,8 @@ def percentile(sorted_vals: list[float], q: float) -> float:
     return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (pos - lo)
 
 
-def bootstrap_cis(columns: dict[str, list[float]], n_boot: int = 1000, seed: int = 0,
+def bootstrap_cis(columns: Mapping[str, Sequence[Optional[float]]], n_boot: int = 1000,
+                  seed: int = 0,
                   level: float = 0.95) -> dict[str, tuple[float, float]]:
     """Percentile bootstrap CIs of the mean for several equally long columns.
 
@@ -39,11 +41,11 @@ def bootstrap_cis(columns: dict[str, list[float]], n_boot: int = 1000, seed: int
     for _ in range(n_boot):
         idx = [rng.randrange(n) for _ in range(n)]
         for k, col in columns.items():
-            vals = [col[i] for i in idx if col[i] is not None]
+            vals = [v for v in (col[i] for i in idx) if v is not None]
             if vals:
                 stats[k].append(sum(vals) / len(vals))
     alpha = (1.0 - level) / 2
-    out = {}
+    out: dict[str, tuple[float, float]] = {}
     for k, vals in stats.items():
         if vals:
             vals.sort()
@@ -51,7 +53,7 @@ def bootstrap_cis(columns: dict[str, list[float]], n_boot: int = 1000, seed: int
     return out
 
 
-def bootstrap_ci(values: list[float], n_boot: int = 1000, seed: int = 0,
+def bootstrap_ci(values: Sequence[Optional[float]], n_boot: int = 1000, seed: int = 0,
                  level: float = 0.95) -> tuple[float, float] | None:
     """Percentile bootstrap CI of the mean of ``values`` (None if empty)."""
     return bootstrap_cis({"x": list(values)}, n_boot, seed, level).get("x")

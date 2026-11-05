@@ -10,8 +10,13 @@ Catch regressions before they hit production.
 """
 from .compare import compare, load_cases, load_config
 from .core import CaseResult, DiffReport
+from .export import save_csv, save_junit, to_csv, to_junit
+from .html_report import render_html, save_html
+from .markdown import render_markdown
 from .offline import compare_outputs, load_outputs
 from .reporter import print_json, print_report, save_report
+from .testing import assert_no_regressions
+from .thresholds import evaluate_thresholds
 from .version import __version__
 
 __all__ = [
@@ -20,4 +25,8 @@ __all__ = [
     "compare_outputs", "load_outputs",
     "DiffReport", "CaseResult",
     "print_report", "save_report", "print_json",
+    "render_html", "save_html",
+    "to_csv", "save_csv", "to_junit", "save_junit",
+    "evaluate_thresholds", "render_markdown",
+    "assert_no_regressions",
 ]

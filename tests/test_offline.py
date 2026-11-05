@@ -96,3 +96,48 @@ def test_cli_diff_bad_input(tmp_path, capsys):
     with pytest.raises(SystemExit):
         main(["diff", str(f)])
     assert "Input error" in capsys.readouterr().err
+
+
+# ── review fixes: tags validation on both input paths ─────────────────────────
+BAD_TAGS = [5, True, 1.5, {"team": "core"}, ["a", ["b"]], [None], ["a", False],
+            [{"k": 1}]]
+
+
+@pytest.mark.parametrize("tags", BAD_TAGS)
+def test_outputs_file_with_bad_tags_is_a_clean_input_error(tmp_path, capsys, tags):
+    f = _write(tmp_path, [ROWS[0], dict(ROWS[1], tags=tags)])
+    with pytest.raises(ValueError, match=r"Record 2 \(diff\): 'tags' must be a string"):
+        load_outputs(f)
+    with pytest.raises(SystemExit) as e:
+        main(["diff", str(f), "--summary"])
+    assert e.value.code == 1
+    err = capsys.readouterr().err
+    assert "Input error" in err and "Record 2 (diff)" in err and "Traceback" not in err
+
+
+@pytest.mark.parametrize("tags", BAD_TAGS)
+def test_cases_file_with_bad_tags_is_rejected_the_same_way(tmp_path, tags):
+    from promptdrift.compare import load_cases
+
+    f = tmp_path / "cases.json"
+    f.write_text(json.dumps([{"input": "x", "tags": tags}]))
+    with pytest.raises(ValueError, match="'tags' must be a list of strings"):
+        load_cases(f)
+
+
+def test_good_tags_and_empty_entries():
+    rows = [dict(ROWS[0], tags=["a", 2, 1.5]), dict(ROWS[1], tags=""),
+            dict(ROWS[0], case_id="c3", tags=["", "  ", "b"]), dict(ROWS[1], case_id="c4",
+                                                                 tags=None)]
+    rep = compare_outputs(rows, bootstrap=0)
+    assert [c.tags for c in rep.cases] == [["a", "2", "1.5"], None, ["b"], None]
+
+
+def test_score_case_rejects_scalar_or_mapping_tags():
+    from promptdrift.scoring import _case_tags
+
+    assert _case_tags({"tags": ("x", None, "y")}) == ["x", "y"]
+    assert _case_tags({"tags": []}) is None
+    for bad in (5, True, {"team": "core"}):
+        with pytest.raises(ValueError, match="'tags' must be a string or a list"):
+            _case_tags({"id": "c", "tags": bad})

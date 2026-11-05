@@ -1,0 +1,58 @@
+# Sample GitHub Actions workflow for promptdrift.
+#
+# This file lives under examples/ci/ on purpose: it is NOT registered under
+# .github/workflows/ and does not run in this repository's CI. Copy it to
+# .github/workflows/promptdrift.yml in your own repository and adjust the paths.
+#
+# What it does:
+#   1. installs promptdrift from GitHub (it is not on PyPI yet),
+#   2. runs the offline example on logged outputs (no API key, no cost),
+#   3. fails the job when any deterministic check went from pass to fail,
+#   4. keeps the JSON report as a build artifact.
+#
+# v0.3.0 also ships a reusable composite action (uses: dakshtrehan/promptdrift@main)
+# that posts a summary comment on the pull request and uploads the HTML report.
+# This plain workflow is the minimal version that needs nothing but the CLI.
+
+name: promptdrift
+
+on:
+  pull_request:
+    paths:
+      - "prompts/**"
+      - "examples/offline/**"
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install promptdrift
+        run: pip install "git+https://github.com/dakshtrehan/promptdrift.git"
+
+      - name: Compare logged outputs (offline, no model calls)
+        # API keys are blanked so a stray --judge flag cannot spend money.
+        env:
+          OPENAI_API_KEY: ""
+          ANTHROPIC_API_KEY: ""
+        run: |
+          promptdrift diff examples/offline/outputs.jsonl \
+            --name-a v1 --name-b v2 \
+            --checks examples/offline/checks.yaml \
+            --output promptdrift-report.json \
+            --fail-on-regression
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: promptdrift-report
+          path: promptdrift-report.json

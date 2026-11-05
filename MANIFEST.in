@@ -1,3 +1,11 @@
 include LICENSE README.md CHANGELOG.md
+include action.yml
+recursive-include action *.py *.md
+recursive-include .github/workflows *.yml
 recursive-include tests *.py
-recursive-include examples *.json *.jsonl *.yaml
+# tests/test_docs.py checks the documentation site, which is not part of the sdist
+exclude tests/test_docs.py
+recursive-include examples *.json *.jsonl *.yaml *.yml *.py *.sh *.md *.txt
+recursive-include benchmark *.py *.md *.jsonl
+global-exclude __pycache__ *.py[cod]
+prune examples/offline/out

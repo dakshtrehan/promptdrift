@@ -275,3 +275,525 @@ public replacements listed in the README.
 * The existing `publish.yml` (trusted publishing on GitHub Release) was left in
   place. RELEASE.md explains that it conflicts with a manual token upload of the
   same version if a GitHub Release is also published, and how to choose one route.
+
+# Decisions log for v0.3.0
+
+v0.3.0 was built unattended on top of the v0.2.0 branch, with the work split
+into six workstreams run by separate agents and then an adversarial review pass.
+Each workstream appends its own section below. Entries made before the
+workstreams started are numbered D12 onwards.
+
+## D12. Branching and orchestration
+
+* The branch starts from the open v0.2.0 PR branch (`claude/adoring-keller-fuc8cc`)
+  rather than `main`, so v0.3.0 builds on the tested v0.2.0 code and the PR will
+  show only the v0.3.0 delta once v0.2.0 merges.
+* Workstreams were ordered by dependency: HTML report and exports (B) and
+  examples/benchmark (E) first, because the GitHub Action (A) needs the HTML,
+  JUnit and Markdown outputs; then watch mode and the pytest plugin (C) with the
+  Action (A); then documentation (D) and hardening (F), which must describe the
+  finished features. A final adversarial review fans out over the integrated result.
+* The environment has no Docker daemon, so `act` cannot run. Action tests use a
+  small mocked runner that executes the composite steps with a fake GitHub API.
+* Hard rules carried into every workstream: every paid model call is mocked,
+  nothing is published or deployed outside this repo's own CI, v0.2.0 public
+  names and behaviour stay unchanged, and docs contain no em dashes.
+
+## D13. Interface contracts agreed before implementation
+
+So that parallel work fits together, these names were fixed in advance:
+
+* `promptdrift.html_report`: `render_html(report) -> str`, `save_html(report, path)`.
+  Self-contained file, inline CSS and JS, no external requests.
+* `promptdrift.export`: `to_csv(report) -> str`, `save_csv(report, path)`,
+  `to_junit(report) -> str`, `save_junit(report, path)`.
+* `promptdrift.markdown`: `render_markdown(report, ...) -> str` for PR comments
+  and `GITHUB_STEP_SUMMARY`.
+* `promptdrift.thresholds`: `evaluate_thresholds(report, max_drift=None,
+  max_regressions=None, max_format_changes=None, max_flips=None,
+  fail_on_regression=False) -> list[str]` returning human readable failures.
+* CLI: `--html FILE`, `--csv FILE`, `--junit FILE`, `--max-drift X`,
+  `--max-regressions N`, `--max-format-changes N`, `--max-flips N` on both
+  `compare` and `diff`; new `watch` subcommand that wraps `compare` or `diff`.
+* `CaseResult.tags: list[str] | None` appended with a default, fed from an
+  optional `tags` list on cases and offline records, for per-tag breakdowns.
+* pytest plugin module `promptdrift.pytest_plugin`, registered through the
+  `pytest11` entry point, inert unless `--promptdrift` is passed.
+* Composite action at the repo root (`action.yml`) with helper scripts under
+  `action/`, so `uses: dakshtrehan/promptdrift@<ref>` works.
+* Docs site under `docs/` built by `mkdocs.yml` with mkdocs-material and
+  mkdocstrings, deployed by `.github/workflows/docs.yml` to this repo's Pages.
+* Version becomes 0.3.0 in `promptdrift/version.py` during hardening.
+
+## D14. HTML report, CSV and JUnit export (workstream B)
+
+* `promptdrift.html_report` builds the page from Python strings with
+  `html.escape` on every value; no templating library and no embedded JSON, so
+  the page does not depend on JavaScript. Word diffs use
+  `difflib.SequenceMatcher` on whitespace-split words; each side keeps its own
+  whitespace, and highlight runs hug the words (trailing gaps stay outside
+  `<del>`/`<ins>`), so newlines and RTL text render as written.
+* Each case is its own `<tbody>` carrying `data-*` attributes (drift, level
+  rank, verdict, flip, tags as `|a|b|`, regression flag, original index). Sorting
+  reorders tbodies and filtering hides them, which keeps the summary row and
+  the detail row together. With JavaScript off, every detail row is visible and
+  the controls are hidden (`.js` class is added by an inline head script).
+* Theme: CSS variables on `:root`, dark values under `prefers-color-scheme` guarded
+  by `:root:not([data-theme=light])` and again under `:root[data-theme=dark]`;
+  the toggle writes `promptdrift-theme` to `localStorage` inside try/except.
+* The verdict rule moved into `reporter.verdict_for(report) -> (status, reason)`
+  with `VERDICT_LABEL`; `print_report` output is byte-for-byte unchanged, and the
+  HTML and JUnit outputs reuse it so the three never disagree.
+* `CaseResult.tags` is appended last with default `None`. A bare string tag is
+  normalised to a one-item list in `scoring._case_tags`; `load_cases` rejects
+  non-list, non-string tags early.
+* CSV: `\r\n` line endings per RFC 4180, booleans as `true`/`false`, None as
+  empty, tags joined with `;`. Outputs are opt-in via `include_outputs=True`
+  because they can be large and multi-line; `expected` is not a column since
+  `CaseResult` does not store it.
+* JUnit: `<testsuites>` wrapping one `<testsuite name="promptdrift">`, because
+  Jenkins, GitHub test reporters and GitLab all accept the wrapper and some
+  require it. `classname` is the first tag when present, otherwise
+  `"<version_a> vs <version_b>"`. A judge `error` on a non-regressed case is an
+  `<error>` rather than a failure so CI counts it separately. `time` is the sum
+  of the stored latencies (0 in offline mode).
+* CLI: `--html`, `--csv`, `--junit` live in `_add_output_args` so compare and
+  diff share them; `_emit_exports` uses `getattr` so older Namespace objects
+  without the attributes keep working.
+* Screenshots were taken with Playwright driving the system Chrome
+  (`executable_path=/usr/bin/google-chrome`) because the Playwright browser
+  download is blocked in this environment; the demo report is built in Python
+  from `examples/outputs.jsonl` plus tags and three edge cases (RTL plus emoji,
+  empty outputs, a `<script>` payload) without touching `examples/`.
+* Not done: a screenshot test in CI (would need a browser in the matrix) and an
+  `expected` column or field, which would widen `CaseResult` beyond the agreed
+  contract.
+
+## D-E. Workstream E: examples directory and benchmark
+
+* `examples/` keeps `v1.yaml`, `v2.yaml`, `golden.json` and `outputs.jsonl` in
+  place (the README, `ci.yml` and tests reference those paths) and adds copies
+  of the live files under `examples/live/`, so a move can happen in a later
+  release without breaking links. `outputs.jsonl` only gained a `tags` list per
+  record; every existing record and field is unchanged.
+* The offline scenario (`examples/offline/`) is a fictional support assistant
+  whose prompt was edited; 16 logged cases carry tags and checks. Two cases are
+  deliberate regressions (a changed refund window and a JSON that lost its
+  closing brace), one is a format change, one an improvement, one a multi-sample
+  record with a negative excess drift and a placeholder leak caught by the
+  default check spec at a 67 percent pass rate. `tests/test_examples.py` pins
+  the exact counts so the data cannot drift from its README.
+* `run.sh` uses `--html`, `--csv`, `--junit` (already in the CLI when it was
+  written) and adds `--max-drift 0.30 --max-regressions 0` only when
+  `promptdrift diff --help` lists them, falling back to `--fail-on-regression`.
+  So the script works on 0.2.0 and picks up the v0.3.0 thresholds without an
+  edit. It exits 1 on purpose. `expected_output.txt` is generated by the script
+  (`UPDATE_EXPECTED=1`) with colour codes stripped and the "saved" lines dropped
+  because they hold absolute paths; the test compares only the key summary
+  lines, so a reporter restyle or version bump does not break it, but the file
+  should be refreshed after the version bump so it shows 0.3.0.
+* `examples/live/mock_provider.py` patches `get_provider` on the
+  `promptdrift.compare` module object with `mock.patch.object` rather than the
+  dotted string, because `promptdrift.compare` is also the re-exported function
+  and the string form resolves to the function on Python 3.9 and 3.10 and would
+  then build a real provider. A test asserts the example never does.
+  Config dicts passed to `compare()` get no defaults (only `load_config` fills
+  them in), so the example sets `temperature` and `max_tokens` explicitly;
+  that asymmetry is worth fixing in core at some point.
+* `examples/ci/test_no_regressions.py` marks two tests `xfail` because the
+  example data contains deliberate regressions; the file documents that users
+  drop the marker. It uses the public API only and mentions the v0.3.0 pytest
+  plugin without depending on it.
+* Benchmark data: the proxy refused huggingface.co, hf-mirror.com and the
+  GLUE host, so the MRPC test split was fetched from a public GitHub mirror of
+  `msr_paraphrase_test.txt` (1725 pairs). 100 paraphrases and 100
+  non-paraphrases were sampled with `random.Random(0)` after dropping the few
+  pairs containing en or em dashes (house rule). The sample is rebalanced on
+  purpose (the split is 68 percent paraphrases) so AUC and accuracy read
+  cleanly; `data/SOURCE.md` says so and carries the MRPC licence note.
+* The embedding leg could not run here: `sentence-transformers` 6.2.0 and
+  torch 2.15.0 installed from PyPI into a throwaway venv (not the shared
+  environment, and not added to `pyproject.toml`), but every route to the
+  model weights (huggingface.co, hf-mirror.com, the old Qdrant GCS mirror)
+  was refused by the proxy. `RESULTS.md` is written from a real run and
+  records the exact failure and the fact that only the TF-IDF column is
+  present; nothing is estimated. The script accepts `--model <local dir>` and
+  `--note` so a later run can fill the column in with the same data.
+* ROC AUC, best-threshold accuracy and Spearman are implemented in pure Python
+  in the script (average ranks, Mann-Whitney U) and tested against a brute
+  force pair count; a fake `sentence_transformers` module in the tests drives
+  the whole embedding path offline so it is covered (98 percent) even though
+  the real model never loaded.
+* The honest result: TF-IDF drift gets AUC 0.79 and 73.5 percent best-threshold
+  accuracy on 200 MRPC pairs, with paraphrases at 0.25 mean drift and
+  non-paraphrases at 0.40. RESULTS.md lists the paraphrases it scores far
+  apart and the non-paraphrases it scores close, and says plainly that TF-IDF
+  is a change detector, not a paraphrase detector, which is why checks, noise
+  floors and the judge exist.
+
+## D-A. Workstream A: reusable GitHub Action, thresholds and Markdown
+
+* `promptdrift.thresholds.evaluate_thresholds` and
+  `promptdrift.markdown.render_markdown` accept either a `DiffReport` or the
+  dict written by `--output` (`DiffReport.to_dict()`), so the action's
+  `summarize.py` works from `report.json` without re-running anything.
+  `markdown.report_from_dict` rebuilds a `DiffReport` with `n_bootstrap=0`
+  (the seed is not stored) and the stored `summary.ci` is reused, which keeps
+  the comment byte-identical to what the CLI computed.
+* `--max-drift` is a fraction on the `avg_drift` scale (0.1 is 10 percent),
+  the other limits are inclusive counts. Breaches print one sentence each to
+  stderr and exit 1; `--fail-on-regression` keeps its silent exit 1 so v0.2.0
+  scripts see no new output. `fail_on_regression=True` in
+  `evaluate_thresholds` produces its own sentence so the action can show it.
+* Markdown escaping: text goes through `html.escape` plus backslashes on
+  `` \ ` * _ [ ] ~ | ``; outputs go into code spans whose fence is one
+  backtick longer than the longest run inside, with newlines collapsed, `<`
+  `>` `&` as entities and `|` escaped inside table cells. Case output never
+  starts a line, so no HTML block (`</details>`) can open. `render_markdown`
+  takes an extra trailing `failures=` list on top of the agreed signature.
+  `verdict` emoji: check mark, warning sign, cross mark.
+* Action design: inputs reach bash only as environment variables and are
+  appended to an argv array, never eval'd; `extra-args` is split on
+  whitespace (documented, no quoting). The run step always writes
+  `report.json`, `report.html`, `report.junit.xml` and `report.csv` into an
+  absolute `report-dir`, captures the exit code into a step output and never
+  fails by itself; the last step (`if: always()`) exits with that code after
+  printing `threshold-failures.txt`. `summarize.py` is stdlib only, reads
+  `INPUT_*` and `GITHUB_*` from the environment, re-evaluates the thresholds
+  from `report.json`, writes outputs with `GITHUB_OUTPUT` heredoc syntax for
+  multi-line values, and upserts the comment by paging issue comments
+  (`per_page=100`, `Link: rel="next"`) for the marker. HTTP 401/403/404 on
+  the comment (fork PRs) become a `::warning::` and an empty `comment-id`;
+  events without a PR number print a `::notice::` and skip the comment.
+* The `verdict` output is `fail` when a threshold breached, promptdrift
+  exited non zero, or the report verdict is DO NOT SHIP, even if the job
+  passes (as in the dogfood workflow with `fail-on-regression: "false"`).
+  `review` and `ship` follow `reporter.verdict_for`; a summary-only dict
+  without `cases` uses the same rule computed from the summary numbers.
+* Tests: no Docker, so `tests/test_action.py` carries a mocked runner that
+  executes the composite `run` steps with bash, substitutes `inputs.*`,
+  `github.action_path`, `github.token` and `steps.*.outputs.*` (recursively,
+  so the `${{ github.token }}` default resolves), honours `always()` and a
+  single `inputs.x == 'y'` clause, and raises on anything else so a change to
+  action.yml that needs more is noticed. A fake `promptdrift` on PATH records
+  argv for the live-mode command without any provider. The fake GitHub API is
+  a `ThreadingHTTPServer` on 127.0.0.1 with `NO_PROXY` set.
+* Found, not fixed (not my files): the `pytest11` entry point added by
+  workstream C imports `promptdrift` before pytest-cov starts, so
+  `pytest --cov` under-reports import-time lines of every module (total showed
+  83 percent with the plugin registered, 100 percent for my modules with
+  `-p no:promptdrift`). Hardening should either run coverage with
+  `coverage run -m pytest`, pass `-p no:promptdrift` in CI, or make the plugin
+  module import `promptdrift` lazily.
+
+## D-C. Workstream C: watch mode, pytest plugin and assert_no_regressions
+
+* `promptdrift watch [--interval S] [--clear] [--once] <compare|diff> <args...>`
+  reuses the real `compare` and `diff` subparsers: `cmd_watch` re-parses the
+  wrapped arguments with the main parser, so every flag the other workstreams
+  add (thresholds, exports) works under `watch` with no extra wiring. Watched
+  inputs are the config files, the cases file and the checks file for
+  `compare`, and the outputs file plus the checks file for `diff`; output
+  files are never watched, so a run cannot trigger itself.
+* The watcher in `promptdrift.watch` polls `(mtime_ns, size)` per file
+  (default 1.0 s, floored at 0.05 s) and treats missing files as "watched for
+  creation". When `watchdog` is importable (optional extra `watch`, not a
+  dependency) it only wakes the loop early; what changed is still decided from
+  the poll snapshot, so both backends behave identically and the watchdog path
+  is tested with a fake module instead of a real observer.
+* Each run goes through `run_wrapped`, which turns `sys.exit` inside the
+  wrapped command into a return code shown in the status line
+  (`watch [HH:MM:SS] diff finished in 0.42s, exit 1`). In continuous mode the
+  process never exits on regressions and Ctrl-C returns 0; with `--once` the
+  wrapped command's exit code is propagated so `watch --once` can stand in
+  for the plain command in scripts and tests.
+* The cost warning ("watch re-runs call the model on every change; use
+  --no-judge or offline diff to limit cost") is printed for every `compare`
+  (generation itself calls the model even with `--no-judge`) and for
+  `diff --judge`; plain `diff` prints nothing because it calls no model.
+* The pytest plugin logic lives in `promptdrift.pytest_plugin` as D13 says, but
+  the `pytest11` entry point points at a top-level shim module
+  `_promptdrift_pytest` (shipped through `py-modules`). Pointing the entry
+  point straight at the package module imported all of promptdrift at every
+  pytest start-up, before pytest-cov begins measuring, and dropped this repo's
+  own coverage from 99 to 81 percent because every definition line was
+  executed before coverage started. The shim imports the real plugin only when
+  `--promptdrift*` or `--help` is in the arguments (including `addopts` and
+  `PYTEST_ADDOPTS`); pytest replays the historic `pytest_addoption` and
+  `pytest_configure` hooks for the late registration, and
+  `-p promptdrift.pytest_plugin` or `pytest_plugins = [...]` still work because
+  `import_plugin` skips an already registered module. This follows the
+  precedent of Hypothesis's `_hypothesis_pytestplugin`. The shim also defines
+  the `promptdrift_report` fixture so it returns `None` instead of raising a
+  missing fixture error without the option.
+* Items are added in `pytest_collection_modifyitems` with `tryfirst=True`, as
+  children of a `pytest.File` collector per outputs file with nodeid
+  `promptdrift::<file as given>`, so `-m promptdrift`, `-m "not promptdrift"`,
+  `-k` and `--junit-xml` (classname `promptdrift.<file>`) treat them like any
+  other test. Regression items fail with `PromptdriftRegression`, whose
+  message is printed as is (no traceback); unexpected exceptions keep the
+  default pytest rendering. `--promptdrift-max-drift` and
+  `--promptdrift-max-regressions` apply to the per-file `summary` item through
+  `evaluate_thresholds`, so the CLI, the Action and the plugin agree on what
+  "exceeded" means. With several `--promptdrift` files, `--promptdrift-json`
+  and `--promptdrift-html` write numbered files (`report-1.json`,
+  `report-2.json`); a single file keeps the path as given.
+* `promptdrift.testing.assert_no_regressions` builds on
+  `promptdrift.thresholds.evaluate_thresholds` (workstream A landed first), so
+  `max_flips` counts pass-to-fail flips only, matching the CLI. It is exported
+  from `promptdrift.__init__` and appended to `__all__`.
+* Verified: the plugin tests pass on pytest 7.4.4, 8.3.5 and 9.2.0 (throwaway
+  venvs in the scratchpad, package installed with `--no-deps`); `pytest --help`
+  lists the six options through the entry point; the whole suite runs no
+  model call and the two new test files take under two seconds.
+
+## D-D. Workstream D: documentation site
+
+* The site lives under `docs/` and is built by `mkdocs.yml` with
+  mkdocs-material and mkdocstrings[python]. `font: false`, no analytics and
+  no social cards, so neither the build nor the pages fetch anything from the
+  network; the only external URLs in the built HTML are the repository links
+  and the FontAwesome licence comment inside the inlined icons.
+* Every number and output shown in the pages was produced by running the
+  command with the keys blanked, then pasted with ANSI codes stripped. The
+  report header line that carries the version string is trimmed from pasted
+  outputs so a version bump does not make the pages stale; the JUnit excerpt
+  on the formats page shows 0.3.0 because the bump had landed by then.
+* `docs/reference/cli.md` is generated from the real `--help` output of every
+  subcommand by a throwaway script (kept in the scratchpad, not the repo), and
+  `tests/test_docs.py` asserts that every flag `compare --help` and
+  `diff --help` print appears on the page, so the reference cannot fall
+  behind the parser without a test failing.
+* `docs/reference/api.md` uses one `:::` block per module. `promptdrift.compare`
+  is both a submodule and a re-exported function, so that section lists the
+  functions explicitly (`promptdrift.compare.compare`, `load_config`,
+  `load_cases`, `render_prompt`) rather than relying on griffe to pick the
+  module over the function. `docstring_style: null` renders the docstrings as
+  plain text (the code base does not use Google or numpy sections
+  consistently), `show_source: false`, `members_order: source`, and
+  `show_if_no_docstring: true` so that `CaseResult`, `get_provider` and the
+  module constants appear even without a docstring; `filters: ["!^_"]` hides
+  private names. mkdocstrings reads the modules statically, so the build
+  does not need pytest installed for `promptdrift.pytest_plugin`.
+* `changelog.md` and `contributing.md` include `CHANGELOG.md` and
+  `CONTRIBUTING.md` through `pymdownx.snippets` (`base_path` is the repo root
+  and `docs/`, `check_paths: true`) instead of copying them, so the site and
+  the repository files cannot drift apart.
+* The pytest plugin is described as "auto-loaded" and the shim module is not
+  named, as workstream C asked.
+* `tests/test_docs.py` runs every fenced bash block that starts with
+  `# docs-test: run` from a temporary directory that mirrors the repository
+  root through symlinks (`examples`, `benchmark`, `promptdrift`,
+  `pyproject.toml`), so the relative paths in the docs resolve and the report
+  files those commands write never land in the repository. Only offline
+  commands are marked; the test refuses `--judge` and live `compare` in a
+  marked block. The dash check in the test spells the two characters as
+  `chr(0x2014)` and `chr(0x2013)` so the test file passes the rule it
+  enforces.
+* `.github/workflows/docs.yml` builds with `--strict` on every pull request
+  as a check and deploys with `actions/configure-pages`,
+  `actions/upload-pages-artifact` and `actions/deploy-pages` only on a push to
+  `main`, with `pages: write` and `id-token: write` on the deploy job alone.
+  The dash check in the workflow greps for the UTF-8 byte sequences under
+  `LC_ALL=C` because `grep -P "\x{2014}"` fails outside a UTF-8 locale. Pages
+  must be enabled once in the repository settings with "GitHub Actions" as
+  the source; the workflow has not run on a real runner yet.
+* `docs/requirements.txt` pins the toolchain to major versions
+  (`mkdocs>=1.6,<2`, `mkdocs-material>=9.5,<10`, `mkdocstrings[python]>=0.26,<1`,
+  `pymdown-extensions>=10,<11`). `pyproject.toml` was not touched; hardening
+  may add a `docs` extra pointing at the same list. Verified locally with
+  mkdocs 1.6.1, mkdocs-material 9.7.7, mkdocstrings 0.30.1 and
+  mkdocstrings-python 2.0.9: `mkdocs build --strict` passes with zero
+  warnings. mkdocs-material prints a banner about MkDocs 2.0 on every build;
+  it is informational and does not affect strict mode.
+* Not done, not my files: `site/` (the default `mkdocs build` output
+  directory) is not in `.gitignore`; the docs build in this session wrote to
+  the scratchpad instead. README.md was being rewritten by hardening while
+  the docs were written, so the README links to the site are left to that
+  workstream (the URLs are listed in the structured result).
+
+## D-F. Workstream F: hardening and release readiness
+
+* **mypy targets 3.10, not 3.9.** mypy 2.x refuses `python_version = "3.9"`
+  (the oldest it accepts is 3.10). Pinning an old mypy forever was rejected;
+  the config targets 3.10 and 3.9 compatibility is enforced by the real 3.9
+  interpreter in the CI matrix plus a `compileall` step. The suite was also
+  run locally on a uv-installed CPython 3.9.25 (364 passed).
+* **mypy runs in its own CI job on 3.13**, not across the matrix: mypy's
+  version resolves differently per interpreter (2.x needs 3.10+), and a type
+  gate that changes with the interpreter is noise. The strict run is
+  reproducible with `python -m mypy promptdrift`; the bare `mypy` on this
+  machine is a uv tool with its own interpreter and sees no pytest or yaml
+  stubs, so the docs and CI use `python -m mypy`.
+* **Optional SDKs are typed as `Any` everywhere** (`follow_imports = "skip"`
+  plus `ignore_missing_imports` for openai, anthropic, requests, watchdog) so
+  the gate gives the same answer with or without the extras installed. Here
+  watchdog 7 happened to be installed and typed, which would have made a
+  `type: ignore` on the watchdog handler subclass unused on this machine and
+  required in CI; skipping the import removes that dependence.
+* **Protocols instead of `Any` for duck-typed providers.** `SupportsComplete`
+  and `SupportsEmbed` live in `promptdrift.providers` and are imported under
+  `TYPE_CHECKING` by judge, scoring, similarity, compare and offline, so no
+  import cycle or runtime cost. They are not `runtime_checkable`: the API
+  has always accepted any object with the right method and should keep doing
+  so without `isinstance` games.
+* **Annotation-only edits, with three tiny runtime changes** that are
+  behaviour-preserving: the CLI passes the `--max-*` limits as explicit
+  keyword arguments instead of `**dict`, `judge_both_orders` tests the
+  tuples (`ab is None or ba is None`) instead of their first elements, and
+  `stability_summary` guards `excess_drift is not None` before comparing.
+  Two real fixes rode along and are in the changelog: `compare()` with
+  config dicts that omit `system`, `temperature` or `max_tokens` no longer
+  raises `KeyError` (same defaults as `load_config`), and the drift of
+  identical outputs is clamped at `0.0` so `-0.0` never appears in reports.
+* **ruff rule set unchanged.** Trying `UP` and `SIM` produced 89 findings,
+  mostly `Optional[X]` to `X | None` rewrites in runtime-evaluated positions
+  and contextlib.suppress suggestions; adopting them would be churn across
+  files other workstreams own and partly conflicts with the 3.9 rule. Noted
+  here; a later release can adopt them in one sweep.
+* **Coverage** is measured over `promptdrift` and `action` (99.25 percent,
+  364 tests at the time of the final gate) with `fail_under = 90`. The
+  pytest11 shim from workstream C already keeps import-time lines visible to
+  pytest-cov, so no `coverage run` wrapper was needed.
+* **Sdist contents.** The sdist ships `action.yml`, `action/`, `examples/`,
+  `benchmark/`, `tests/` and `.github/workflows/` so `pytest` passes from an
+  unpacked sdist (verified: 323 passed), and leaves out `docs/` (1.3 MB of
+  screenshots) together with `tests/test_docs.py`, which only checks the
+  docs site. A `docs` extra in pyproject mirrors `docs/requirements.txt`.
+* **Benchmark results were not regenerated**, only the version string was
+  updated. Regenerating with `--no-embeddings` would have replaced the
+  honest "model download blocked by the proxy" record with "skipped by
+  flag"; instead the script was re-run with `--no-write` and the numbers
+  (AUC 0.792, threshold 0.315, accuracy 73.5 percent) confirmed unchanged,
+  which they must be since the TF-IDF code did not change.
+* **Terminal demo** is a static SVG plus a six-frame GIF, both rendered by a
+  scratchpad script from the captured ANSI output of
+  `promptdrift diff examples/offline/outputs.jsonl --name-a v1 --name-b v2 --checks examples/offline/checks.yaml --summary`.
+  asciinema and agg were not tried: GitHub release downloads are not
+  reachable through the proxy and a hand-rendered SVG needs no binary. The
+  GIF uses DejaVu Sans Mono from the system; the SVG relies on the viewer's
+  monospace font.
+* **README snippets** were all executed in a scratch copy before going in;
+  the one `evaluate_thresholds` output comment shows the real list. Snippets
+  that need a key (`compare`, `--judge`) are labelled as such and not run.
+* **CI plugin smoke asserts the failure**, because the offline example
+  regresses on purpose: the job requires exit code 1 and a JUnit file with
+  17 tests and 3 failures (two cases plus the summary), rather than a green
+  run that would prove nothing.
+* **Release checklist** in RELEASE.md is ordered: merge v0.2.0, merge this
+  PR, enable Pages (Source: GitHub Actions) once, tag `v0.3.0`, moving
+  `v0.3` tag for the action, GitHub release notes from the changelog, PyPI
+  by the maintainer with their own token, post-release checks. None of
+  these steps were performed.
+* **Python 3.9 was executed locally** (uv-installed 3.9.25, dev extras
+  installed, full suite). One run of the full suite on 3.9 failed
+  `tests/test_pytest_plugin.py::test_html_skipped_when_module_missing`
+  once while another workstream was committing; it passed alone, with the
+  new docs tests, and in the repeated full runs afterwards, so it is treated
+  as a transient of the shared tree rather than a 3.9 incompatibility.
+* **Correction to the 3.9 note above.** The failure of
+  `test_html_skipped_when_module_missing` was not a transient of the shared
+  tree: it was order dependent and reproducible (it failed on every
+  standalone run of `tests/test_pytest_plugin.py` on 3.13, before and after
+  the hardening changes, and in roughly half of the full-suite runs on 3.9).
+  The inner pytester run emits pytest's "module already imported so cannot
+  be rewritten" warning for the plugin whenever an earlier test imported
+  it, and Python shows a warning once per location per process, so the
+  exact `warnings=1` count varied with test order. The count assertion was
+  removed; the test still asserts the outcomes and the presence of the
+  `--promptdrift-html ignored` warning. After the fix the full suite passed
+  twice on 3.9 and on 3.13, and the file passes standalone on both.
+
+## D15. CI runs on every pull request, not only those targeting main
+
+The v0.3.0 PR is stacked on the v0.2.0 PR branch so that it shows only the
+v0.3.0 delta and GitHub retargets it to `main` once v0.2.0 merges. `ci.yml`
+only ran for pull requests whose base was `main`, so a stacked PR got no
+checks. The trigger is now a bare `pull_request` (any base) plus
+`workflow_dispatch`, matching `docs.yml` and `promptdrift-example.yml`.
+
+## D16. First real CI run: two failures fixed
+
+The first run of `ci.yml` on a GitHub runner failed in two places that the
+local runs had not shown.
+
+* The pytest plugin smoke step ran `pytest --promptdrift ...` from the repo
+  root with no path argument, so pytest collected this repo's own 364 tests
+  next to the plugin's 17 generated items and the `tests="17"` check failed.
+  The step now passes an empty directory as the only collection target.
+  Locally the agent had run the command from a different directory.
+* `examples/offline/run.sh` piped a second `--json` run through `head -n 12`
+  under `set -o pipefail`. On the runner `head` closed the pipe while Python
+  was still writing, Python reported the failed flush at shutdown and exited
+  120 instead of 1. The script now reads the first lines of the report.json it
+  already wrote. The CLI also gained a broken pipe guard: `promptdrift ... |
+  head` keeps writing its files, keeps its exit code and no longer prints a
+  traceback. A test with an outputs file larger than the pipe buffer proves the
+  failure on the old code and the fix on the new one.
+
+## Review fixes (group B)
+
+Group B covered the action, workflows, docs, examples and release notes. Every fix comes with a test in tests/test_action.py, test_docs.py or test_examples.py.
+
+- action-1 and security-7 (comment API errors broke the step): `upsert_comment` now turns every failure into a `::warning::` and returns None. That covers any HTTPError (fork wording kept for 401/403/404), URLError, other OSErrors such as read timeouts, and a body that is not JSON. `main()` writes `$GITHUB_OUTPUT` and the `::error::` lines before it tries the comment. It then appends `comment-id` alone, and the last value for a key wins. The old test that pinned "a 500 raises" now expects None. No retry was added.
+- action-2 (first docs deploy): dropped `configure-pages`, since nothing uses its output and it fails while Pages is disabled. Added `workflow_dispatch`, and the upload and deploy conditions are now `event_name != 'pull_request' && ref == main`, so a manual run on main deploys. The header comment is corrected. RELEASE.md now enables Pages in step 2, before the v0.3.0 merge in step 3, and says how to re-run if Pages was enabled late. D15's statement that docs.yml has `workflow_dispatch` is now true.
+- action-3 (thresholds vanished without promptdrift importable): `summarize.py` has a stdlib copy of the threshold rules with identical sentences, including the tie-breaking decimals. A parity test runs it against `promptdrift.thresholds`. It is used with a `::warning::` when the import fails and any threshold input is set. Threshold inputs that do not parse, or that the library rejects, also become a warning instead of a traceback. With `install: skip`, the install step warns when `python` cannot import promptdrift. setup-python is still always run, so the summary step has a known Python.
+- action-4 (misleading steps after a failed install or run): the upload step also requires `steps.run.outputs.report-dir != ''`. "Fail on thresholds" prints `::error::promptdrift did not run` and exits 1 when there is no exit code. The job fails in the same cases as before.
+- action-5: live mode now needs `cases` too. A missing input takes the existing exit-code 2 configuration error path.
+- action-6: moved to the Node.js 24 majors: checkout@v5, setup-python@v6, upload-artifact@v6 (v5 is still node20), upload-pages-artifact@v5, deploy-pages@v5. This covers action.yml, every workflow and the docs samples. The runner 2.327.1 requirement is documented in action/README.md, the action reference and the CHANGELOG.
+- action-7: the artifact-name rows and the two-jobs advice now say the name must be unique per workflow run, with a matrix example. The default stays `promptdrift-report`, and no overwrite or continue-on-error was added.
+- tests-5: the in-process mock_provider test blanks the keys through monkeypatch, so they are restored at teardown. The example itself is unchanged.
+- docs-2, docs-4, docs-6: formats.md and the mock_provider comment now describe the compare() dict defaults. The quickstart shows the real relative `init` output. The plain workflow sample uploads both the JSON and the JUnit file. Each has a test.
+- docs-3: README and RELEASE.md say the action is dogfooded on this repository's pull requests, and that the first external run is step 8. DECISIONS.md:600 is left as history.
+- docs-5: the README and docs/index extras tables list the full dev extra and a new `docs` row, and Ollama's `requests` need is stated consistently. A test compares the dev and docs rows with pyproject.toml, read without tomllib so it works on 3.9. The dev rows also list markdown-it-py, which group A added to the dev extra in this round.
+- docs-7: `judge` and `fail-on-regression` go through a bash 3.2 safe `is_true` (`tr`, not `${v,,}`). It accepts true/yes/on/1 in any case, the same as `summarize.truthy`. "true" and "false" behave as before. The docs are updated.
+- docs-8: RELEASE.md section 6 step 3 and step 9 now say to delete the `[0.3.0]` "Not yet published" line and to mark the never-uploaded `[0.2.0]` entry as superseded, not delete it.
+- security-3: the run step deletes report.json, report.html, report.junit.xml, report.csv and threshold-failures.txt. The directory prefix is on each path, and this happens before promptdrift runs. As a second guard, `build_markdown` puts "promptdrift exited with code N" right after the marker when the exit code is non-zero and no threshold failed.
+- security-4: `find_existing_comment` only takes a comment whose body starts with the marker. It prefers a Bot author, which covers `github-actions[bot]` and app tokens. Otherwise it takes the token's own user, looked up with `GET /user` for PATs. A 403 there, which the default token gets, means no match, and the action posts a new comment. The login is not hard-coded, so PAT and app tokens keep working. No POST fallback was added after a PATCH 403.
+
+## Review fixes (group A)
+
+Group A covered library code, tests and pyproject. Each code fix has a test.
+
+- library-1, security-1 (JUnit not well-formed with control characters): `to_junit` runs one pass over the serialised XML and replaces every character XML 1.0 forbids (C0 controls other than tab, LF and CR, lone surrogates, U+FFFE, U+FFFF) with a visible escape such as `\x1b`. ElementTree leaves them raw and real markup never contains them, so this covers every attribute and text node. The visible escape was chosen over U+FFFD so an ANSI code or NUL stays diagnosable in a CI report. The docstring no longer claims xml.etree escapes everything.
+- security-2 (lone surrogates crash the writers): `save_html`, `save_csv` and `render_markdown` replace lone surrogates with U+FFFD; `save_junit` is covered by the XML pass above. report.json and the scores are unchanged (json.dumps already escaped them). Fixing it in `render_markdown` also stops the Action's step summary write from crashing without touching action/.
+- security-11 (CSV formula injection): `to_csv` and `save_csv` put a leading `'` on text cells (case id, joined tags, input, outputs) that start with `= + - @`, tab or CR. Numeric columns are never touched. A new keyword-only `escape_formulas=True` gives the raw text when set to False. The docs note for formats.md belongs to group B and is not written.
+- library-6, security-6 and the orchestrator's PR comment report (entities and backslashes inside code spans): `esc_code` no longer HTML-escapes; CommonMark shows code span content literally, the fence is longer than any backtick run inside and no span starts a line, so `</details>`, `<script>` and `| x |` stay text. This supersedes the "< > & as entities" design recorded in D-A. In table cells a pipe always ends up behind an odd number of backslashes, so a tag like `a\|b` can no longer split a row (it shows one extra backslash). Version names now use `esc_code(..., limit=None)`, so `v1_base` has no backslash and a backtick in a name cannot close the span. The hostile-output test now checks the text outside code spans, and a new test parses the comment with markdown-it-py (added to the dev extra, skipped when missing) and asserts the only raw HTML is the module's own. Note for the action: tag and version text before the details block is now unescaped, so a tag literally named `<details>` could move `summarize.py`'s over-length cut earlier (harmless, the cut only drops the block).
+- library-2 (DiffReport and report.json gate differently): `_summary_counts` rounds `avg_drift` to 4 decimals, the precision of `to_dict()`, so the CLI, `assert_no_regressions`, the plugin and the Action all gate the same number. The failure sentence keeps the one decimal wording and adds decimals only when both numbers would print the same ("10.04% exceeds 10.00%"), so no existing message changes.
+- library-7 (max-drift in percent always passes): `evaluate_thresholds` raises ValueError unless `0.0 <= max_drift <= 1.0` (NaN and infinity rejected too); `--max-drift` and `--promptdrift-max-drift` use an argparse type built on the same check, so a bad value is a usage error (exit 2). summarize.py already turns the ValueError into a warning (group B).
+- library-3, security-8 (watch dies on a half-saved YAML file): `_load_checks` turns `yaml.YAMLError` into a ValueError, so `diff` and `compare` print a one-line input or config error; `cmd_diff` also gained the catch-all `except Exception` that `cmd_compare` has (traceback only with `--verbose`). `watch.run_wrapped` turns any `Exception` into one `watch error:` line on stderr and exit 1, so the loop keeps running; KeyboardInterrupt still stops it. Exit codes are unchanged.
+- library-4, security-5 (word diff quadratic on long outputs): `word_diff` keeps the exact word diff while words A times words B is at most `DIFF_BUDGET` (250,000, about 500 by 500 words; measured worst case about 0.1 s on repetitive text). Above that it matches lines first and word-diffs changed line blocks that fit the budget, marking larger blocks whole; one huge line, or too many lines, is shown escaped without marks. The case detail says which fallback was used. autojunk=True was not used because it gives misleading highlights. The signature and return type of `word_diff` are unchanged.
+- library-8 (tag filter collisions, empty chips): `data-tags` is a JSON array and the filter uses `JSON.parse(...).indexOf`, so `a|b` no longer matches `a`. Empty and whitespace-only tags are dropped from chips, the dropdown and the By tag table.
+- security-10 (HTML report slow with many cases): the text filter is debounced (150 ms on input, immediate on change), and each case's lowercase text and tag list are computed once and cached. The detail-row cap and its docs were not done: a cap changes what the report contains and needs a new parameter and docs owned by group B, and the debounce plus cache removes most of the per-keystroke cost.
+- library-5, compat-1 (bad tags crash or turn into garbage): offline records and case files accept `tags` as None, a string or a list of strings or numbers; anything else (int, bool, dict, nested list, None or bool elements) is a ValueError naming the record, which the CLI prints as an input error. `_case_tags` raises ValueError for a non-list scalar or mapping and skips None and empty entries in a list, returning None when nothing is left. This tightens the documented `load_cases` rejection to element level and extends it to outputs files; `tags` is new in 0.3.0, but a v0.2.0 outputs file that happened to carry a scalar `tags` key is now rejected instead of ignored, which the CHANGELOG records.
+- library-9 (`--json` plus a report flag breaks jq): in `--json` mode the "saved" lines from `-o`, `--html`, `--csv` and `--junit` go to stderr. Human mode still prints them to stdout. `save_report` gained a keyword-only `stream=None` argument, so its positional signature is unchanged.
+- compat-2 (closed stdout exits 1): `_flush_stdout_quietly` returns when `sys.stdout` is None and also swallows ValueError. A subprocess test runs the CLI with `>&-` and checks exit 0 and the written report, and that `--fail-on-regression` still returns 1.
+- compat-3 (collected count misses generated items): the plugin reports the generated items through `pytest_collectreport` before adding them, so the header, `--collect-only` and `-k`/`-m` counts include them.
+- tests-1: the CLI export test resolves `examples/outputs.jsonl` from the test file, so the suite passes from any directory.
+- tests-2: `AnthropicProvider` passes `api_key=None` when the key is blank, so the SDK's own credential lookup runs and fails before any request when nothing is configured (and ANTHROPIC_AUTH_TOKEN works again). No ValueError was added, because that would break token, profile and gateway users that work in v0.2.0. OpenAIProvider is unchanged (its SDK already rejects a blank key).
+- tests-3: the docs-test guard checks the whole argv for `compare` and `--judge`, the README guard checks the shell words of every line, and both test environments point OPENAI_BASE_URL and ANTHROPIC_BASE_URL at 127.0.0.1:9 so an accidental live call fails locally.
+- tests-4: `_promptdrift_pytest` is in `[tool.coverage.run] source`, and a pytester test covers the shim's fixture branch, which wins under `-p promptdrift.pytest_plugin --promptdrift FILE`; the branch stays (deleting it would break that documented usage) and the shim's docstring says when it wins. CI passes `--cov=` flags, which override `source`, so group B needs to add `--cov=_promptdrift_pytest` to ci.yml for CI to measure it.
+
+## D17. Adversarial review pass
+
+Six reviewers with separate lenses (library correctness, the Action on a real
+runner, v0.2.0 compatibility, test honesty, docs accuracy, and hostile input)
+raised 43 findings. A separate skeptic tried to refute each one. 41 were
+confirmed and 2 were refuted:
+
+* "unpinned installs resolve to v0.1.1 on main" is true but follows from the
+  stacked PR order, and it goes away once v0.2.0 and v0.3.0 merge.
+* "a backslash before a pipe breaks the tag table" did not reproduce.
+
+Two fixers over disjoint files fixed 37 of the 41. Their sections above list
+each one. Left for later, with reasons recorded by the fixers:
+
+* No cap on HTML report size for very large reports (tens of thousands of
+  cases). The search is now debounced and cached, so the page stays usable.
+* No retry with backoff for GitHub API 429 and 5xx responses. The comment is
+  now best effort, so those responses log a warning instead of failing the job.
+
+A gate agent then reran every check, including a 3.9 run and a wheel installed
+outside the repo. The orchestrator also added `--cov=_promptdrift_pytest` to CI
+so the pytest shim's tested branches are measured, and moved commit trailers
+that one fixer had placed mid-message to the end of those unpushed commits.

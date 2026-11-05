@@ -6,6 +6,9 @@ Usage:
   promptdrift compare v1.yaml v2.yaml --cases golden.json --no-judge --output report.json
   promptdrift compare v1.yaml v2.yaml --cases golden.json --fail-on-regression  # CI mode
   promptdrift diff outputs.jsonl                     # offline, no model calls
+  promptdrift diff outputs.jsonl --html report.html  # self-contained HTML report
+  promptdrift diff outputs.jsonl --csv cases.csv --junit junit.xml  # CI exports
+  promptdrift watch diff outputs.jsonl               # re-run on file changes
   promptdrift init --dir ./prompts
 """
 from __future__ import annotations
@@ -14,9 +17,12 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any, Callable, Optional, Sequence
+
+from .core import DiffReport
 
 
-def cmd_compare(args):
+def cmd_compare(args: argparse.Namespace) -> None:
     from .compare import compare
 
     try:
@@ -51,24 +57,74 @@ def cmd_compare(args):
     _emit(report, args)
 
 
-def _emit(report, args):
+def _emit(report: DiffReport, args: argparse.Namespace) -> None:
     """Print / save a report and set the exit code. Shared by compare and diff."""
     from .reporter import print_json, print_report, save_report
 
-    if args.json:
-        print_json(report)
-    else:
-        print_report(report, show_cases=not args.summary, show_outputs=args.show_outputs)
+    try:
+        if args.json:
+            print_json(report)
+        else:
+            print_report(report, show_cases=not args.summary, show_outputs=args.show_outputs)
+    except BrokenPipeError:
+        # The reader closed the pipe (``promptdrift ... | head``). Stop printing,
+        # but still write the files and evaluate the gates so the exit code holds.
+        _silence_stdout()
 
+    # In --json mode stdout carries only the JSON document; status lines go to stderr.
+    status = sys.stderr if getattr(args, "json", False) else None
     if args.output:
-        save_report(report, args.output)
+        save_report(report, args.output, stream=status)
+    _emit_exports(report, args)
+
+    # Threshold gates (--max-drift and friends): one line per breach on stderr, exit 1.
+    failures = _threshold_failures(report, args)
+    if failures:
+        for line in failures:
+            print(f"  ✗ {line}", file=sys.stderr)
+        sys.exit(1)
 
     # Exit 1 in CI if regressions found
     if report.regressions and args.fail_on_regression:
         sys.exit(1)
 
 
-def cmd_diff(args):
+def _threshold_failures(report: DiffReport, args: argparse.Namespace) -> list[str]:
+    """Evaluate --max-* gates; getattr keeps older Namespace objects working."""
+    limits = {k: getattr(args, k, None)
+              for k in ("max_drift", "max_regressions", "max_format_changes", "max_flips")}
+    if all(v is None for v in limits.values()):
+        return []
+    from .thresholds import evaluate_thresholds
+    return evaluate_thresholds(report, max_drift=limits["max_drift"],
+                               max_regressions=limits["max_regressions"],
+                               max_format_changes=limits["max_format_changes"],
+                               max_flips=limits["max_flips"])
+
+
+def _emit_exports(report: DiffReport, args: argparse.Namespace) -> None:
+    """Write --html, --csv and --junit files when asked (all optional)."""
+    from .reporter import BOLD, GRN, R
+
+    html_path = getattr(args, "html", None)
+    csv_path = getattr(args, "csv", None)
+    junit_path = getattr(args, "junit", None)
+    stream = sys.stderr if getattr(args, "json", False) else sys.stdout
+    if html_path:
+        from .html_report import save_html
+        save_html(report, html_path)
+        print(f"  {GRN}✓{R} HTML report saved → {BOLD}{html_path}{R}", file=stream)
+    if csv_path:
+        from .export import save_csv
+        save_csv(report, csv_path)
+        print(f"  {GRN}✓{R} CSV saved → {BOLD}{csv_path}{R}", file=stream)
+    if junit_path:
+        from .export import save_junit
+        save_junit(report, junit_path)
+        print(f"  {GRN}✓{R} JUnit XML saved → {BOLD}{junit_path}{R}", file=stream)
+
+
+def cmd_diff(args: argparse.Namespace) -> None:
     """Offline mode: score stored outputs without calling any model."""
     from .offline import compare_outputs
 
@@ -92,11 +148,42 @@ def cmd_diff(args):
     except ValueError as e:
         print(f"\n  ✗ Input error: {e}", file=sys.stderr)
         sys.exit(1)
+    except Exception as e:
+        print(f"\n  ✗ Error: {e}", file=sys.stderr)
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
 
     _emit(report, args)
 
 
-def cmd_init(args):
+def cmd_watch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Re-run compare or diff whenever one of its input files changes."""
+    from .watch import COST_WARNING, run_watch
+
+    inner = parser.parse_args([args.wrapped] + list(args.wrapped_args))
+    run: Callable[[argparse.Namespace], None]
+    warning: Optional[str]
+    if inner.command == "compare":
+        paths = [inner.config_a, inner.config_b, inner.cases]
+        run = cmd_compare
+        warning = COST_WARNING
+    else:
+        paths = [inner.outputs]
+        run = cmd_diff
+        warning = COST_WARNING if inner.judge else None
+    if inner.checks:
+        paths.append(inner.checks)
+    if args.interval <= 0:
+        parser.error("--interval must be a positive number of seconds")
+    code = run_watch(lambda: run(inner), paths, label=inner.command, interval=args.interval,
+                     clear=args.clear, once=args.once, warning=warning)
+    if code:
+        sys.exit(code)
+
+
+def cmd_init(args: argparse.Namespace) -> None:
     """Scaffold example prompt configs and test cases."""
     import yaml
     out = Path(args.dir)
@@ -147,7 +234,7 @@ def cmd_init(args):
     print(f"    promptdrift compare {out}/v1.yaml {out}/v2.yaml --cases {out}/golden.json\n")
 
 
-def _load_checks(path):
+def _load_checks(path: Optional[str]) -> Any:
     """Load a default checks spec from a JSON or YAML file (None when not given)."""
     if not path:
         return None
@@ -156,14 +243,18 @@ def _load_checks(path):
     with open(path) as f:
         if str(path).lower().endswith((".yaml", ".yml")):
             import yaml
-            spec = yaml.safe_load(f)
+            try:
+                spec = yaml.safe_load(f)
+            except yaml.YAMLError as e:
+                # a ValueError, so a half-saved file is a one line input error
+                raise ValueError(f"{path}: invalid YAML: {_one_line(e)}") from e
         else:
             spec = json.load(f)
     normalize_checks(spec, expected="")  # validate early; 'exact' may use each case's expected
     return spec
 
 
-def _add_judge_args(p):
+def _add_judge_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--judge-provider", default=None,
                    help="openai | anthropic | ollama (default: from OPENAI_API_KEY, "
                         "else ANTHROPIC_API_KEY)")
@@ -173,7 +264,7 @@ def _add_judge_args(p):
                    help="Judge A-vs-B only (v0.1.1 behaviour) instead of both orders")
 
 
-def _add_output_args(p):
+def _add_output_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--bootstrap", type=int, default=1000, metavar="N",
                    help="Bootstrap resamples for 95%% CIs (default 1000, 0 disables)")
     p.add_argument("--seed", type=int, default=0, help="Random seed for the bootstrap")
@@ -181,14 +272,27 @@ def _add_output_args(p):
                    help="Default deterministic checks (JSON/YAML) for cases without their own")
     p.add_argument("--json", action="store_true", help="Output raw JSON")
     p.add_argument("--output", "-o", metavar="FILE", help="Save report to JSON file")
+    p.add_argument("--html", metavar="FILE",
+                   help="Save a self-contained HTML report (no external requests)")
+    p.add_argument("--csv", metavar="FILE", help="Save one row per case as CSV")
+    p.add_argument("--junit", metavar="FILE",
+                   help="Save JUnit XML (one testcase per case, failures = regressions)")
     p.add_argument("--summary", action="store_true", help="Summary only, no per-case details")
     p.add_argument("--show-outputs", action="store_true",
                    help="Show truncated A/B outputs per case")
     p.add_argument("--fail-on-regression", action="store_true",
                    help="Exit 1 if regressions found (CI)")
+    p.add_argument("--max-drift", type=_fraction, default=None, metavar="X",
+                   help="Exit 1 when average drift exceeds X (fraction, e.g. 0.1 for 10%%)")
+    p.add_argument("--max-regressions", type=int, default=None, metavar="N",
+                   help="Exit 1 when more than N cases regressed")
+    p.add_argument("--max-format-changes", type=int, default=None, metavar="N",
+                   help="Exit 1 when more than N cases changed output format")
+    p.add_argument("--max-flips", type=int, default=None, metavar="N",
+                   help="Exit 1 when more than N checks flipped from pass to fail")
 
 
-def main(argv=None):
+def main(argv: Optional[Sequence[str]] = None) -> None:
     parser = argparse.ArgumentParser(
         prog="promptdrift",
         description="⚡ Semantic diff for LLM prompts. Catch regressions before prod.",
@@ -200,6 +304,8 @@ examples:
   promptdrift compare v1.yaml v2.yaml --cases golden.json --fail-on-regression
   promptdrift compare v1.yaml v2.yaml --cases golden.json --json -o report.json
   promptdrift diff outputs.jsonl --name-a old --name-b new
+  promptdrift diff outputs.jsonl --html report.html --csv cases.csv --junit junit.xml
+  promptdrift watch --clear diff outputs.jsonl --summary
   promptdrift init --dir ./prompts
         """,
     )
@@ -234,19 +340,79 @@ examples:
     _add_output_args(dp)
     dp.add_argument("--verbose", "-v", action="store_true", help="Show per-case progress")
 
+    # watch (wraps compare or diff)
+    wp = sub.add_parser("watch", help="Re-run compare or diff whenever an input file changes")
+    wp.add_argument("--interval", type=float, default=1.0, metavar="SECONDS",
+                    help="Polling interval in seconds (default 1.0)")
+    wp.add_argument("--clear", action="store_true", help="Clear the terminal before each run")
+    wp.add_argument("--once", action="store_true", help="Run once and exit")
+    wp.add_argument("wrapped", choices=["compare", "diff"], metavar="{compare,diff}",
+                    help="Command to re-run")
+    wp.add_argument("wrapped_args", nargs=argparse.REMAINDER, metavar="args",
+                    help="Arguments for the wrapped command")
+
     # init
     ip = sub.add_parser("init", help="Scaffold example files")
     ip.add_argument("--dir", default="./prompts", help="Output directory (default: ./prompts)")
 
     args = parser.parse_args(argv)
-    if args.command == "compare":
-        cmd_compare(args)
-    elif args.command == "diff":
-        cmd_diff(args)
-    elif args.command == "init":
-        cmd_init(args)
-    else:
-        parser.print_help()
+    try:
+        if args.command == "compare":
+            cmd_compare(args)
+        elif args.command == "diff":
+            cmd_diff(args)
+        elif args.command == "watch":
+            cmd_watch(args, parser)
+        elif args.command == "init":
+            cmd_init(args)
+        else:
+            parser.print_help()
+    finally:
+        _flush_stdout_quietly()
+
+
+def _one_line(e: BaseException) -> str:
+    return " ".join(str(e).split())
+
+
+def _fraction(text: str) -> float:
+    """argparse type for ``--max-drift``: a fraction from 0.0 to 1.0."""
+    from .thresholds import check_max_drift
+
+    try:
+        value = check_max_drift(float(text))
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"must be a fraction between 0 and 1 (10 percent is 0.1), got {text!r}") from None
+    assert value is not None
+    return value
+
+
+def _flush_stdout_quietly() -> None:
+    """Flush stdout, and swallow a broken pipe (``promptdrift ... | head``).
+
+    Without this, Python reports the failed flush at interpreter shutdown and
+    exits with status 120, which turns a clean run into a CI failure. The
+    exit code chosen by the command (0, or 1 for a threshold breach) is kept.
+    """
+    out = sys.stdout
+    if out is None:  # started with fd 1 closed (``cmd >&-``, pythonw): nothing to flush
+        return
+    try:
+        out.flush()
+    except (BrokenPipeError, OSError, ValueError):
+        _silence_stdout()
+
+
+def _silence_stdout() -> None:
+    """Point the stdout file descriptor at /dev/null after a broken pipe."""
+    import os
+
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+    except (OSError, ValueError):
+        pass
 
 
 if __name__ == "__main__":

@@ -1,0 +1,126 @@
+site_name: promptdrift
+site_description: Semantic, structural and check-based diff for LLM prompts and model outputs. Catch regressions before they reach production.
+site_url: https://dakshtrehan.github.io/promptdrift/
+repo_url: https://github.com/dakshtrehan/promptdrift
+repo_name: dakshtrehan/promptdrift
+edit_uri: edit/main/docs/
+copyright: MIT licensed. Built by Daksh Trehan.
+
+# Fail the build on broken internal links and anchors (mkdocs build --strict).
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+theme:
+  name: material
+  # No Google Fonts: the build and the page make no network requests.
+  font: false
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep orange
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep orange
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+    - toc.follow
+
+# No analytics, no social cards, no external assets.
+extra:
+  generator: false
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [.]
+          options:
+            # Docstrings are plain reStructuredText-ish prose, not Google or numpy style.
+            docstring_style: null
+            show_source: false
+            members_order: source
+            show_root_heading: true
+            show_root_full_path: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            # Public names without a docstring (dataclasses, constants) still get
+            # their signature listed; private names are filtered out.
+            show_if_no_docstring: true
+            filters: ["!^_"]
+            heading_level: 2
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      # Lets pages include CHANGELOG.md and CONTRIBUTING.md from the repo root
+      # instead of copying them, so the two cannot drift apart.
+      base_path: [".", "docs"]
+      check_paths: true
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Concepts:
+      - Semantic drift: concepts/drift.md
+      - Checks and flips: concepts/flips.md
+      - Noise floor: concepts/noise-floor.md
+      - Structural drift: concepts/structure.md
+      - LLM judge: concepts/judge.md
+      - Confidence intervals: concepts/confidence.md
+      - Verdicts and exit codes: concepts/verdicts.md
+  - Recipes:
+      - Model upgrade: recipes/model-upgrade.md
+      - Prompt edit: recipes/prompt-edit.md
+      - Provider switch: recipes/provider-switch.md
+      - CI gating: recipes/ci-gating.md
+      - pytest plugin: recipes/pytest.md
+      - Watch mode: recipes/watch.md
+      - Offline logs: recipes/offline-logs.md
+      - Tags: recipes/tags.md
+  - Reference:
+      - CLI: reference/cli.md
+      - File formats: reference/formats.md
+      - GitHub Action: reference/action.md
+      - Python API: reference/api.md
+  - Benchmark: benchmark.md
+  - Changelog: changelog.md
+  - Contributing: contributing.md

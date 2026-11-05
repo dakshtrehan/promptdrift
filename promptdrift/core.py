@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import asdict, dataclass, field
+from typing import Any, Iterable
 
 
 # ── Cosine similarity (pure Python, no numpy needed) ─────────────────────────
@@ -37,7 +38,7 @@ class CaseResult:
     input: str
     output_a: str
     output_b: str
-    similarity: float       # 0.0–1.0
+    similarity: float       # 0.0 to 1.0
     drift_score: float      # 1 - similarity
     drift_level: str        # none | minor | moderate | major | regression
     judge_verdict: str | None = None      # improved | regressed | neutral | inconsistent | error
@@ -59,14 +60,14 @@ class CaseResult:
     checks_passed_a: bool | None = None
     checks_passed_b: bool | None = None
     check_flip: str | None = None         # pass_to_fail | fail_to_pass | None
-    check_results_a: list | None = None
-    check_results_b: list | None = None
+    check_results_a: list[dict[str, Any]] | None = None
+    check_results_b: list[dict[str, Any]] | None = None
     check_pass_rate_a: float | None = None  # share of samples passing (1.0 or 0.0 if n=1)
     check_pass_rate_b: float | None = None
     # multi-sample stability; defaults describe a single-sample run
     n_samples: int = 1
-    samples_a: list | None = None
-    samples_b: list | None = None
+    samples_a: list[str] | None = None
+    samples_b: list[str] | None = None
     within_drift_a: float | None = None   # mean pairwise drift among A samples
     within_drift_b: float | None = None
     noise_floor: float | None = None      # mean of the within-version drifts
@@ -75,6 +76,8 @@ class CaseResult:
     judge_verdict_ab: str | None = None
     judge_verdict_ba: str | None = None
     judge_consistent: bool | None = None
+    # optional labels from the case (``"tags": ["math", "json"]``) for per-tag breakdowns
+    tags: list[str] | None = None
 
 
 @dataclass
@@ -116,7 +119,7 @@ class DiffReport:
         """Cases where the judge gave different verdicts depending on output order."""
         return [c for c in self.cases if c.judge_verdict == "inconsistent"]
 
-    def judge_summary(self) -> dict | None:
+    def judge_summary(self) -> dict[str, Any] | None:
         """Judge counts, including order inconsistency, or None if nothing was judged."""
         judged = [c for c in self.cases if c.judge_verdict is not None]
         if not judged:
@@ -130,7 +133,7 @@ class DiffReport:
             "errors": sum(c.judge_verdict == "error" for c in judged),
         }
 
-    def checks_summary(self) -> dict | None:
+    def checks_summary(self) -> dict[str, Any] | None:
         """Pass rates and flip counts over cases that have checks, or None if none do."""
         checked = [c for c in self.cases if c.checks_passed_a is not None]
         if not checked:
@@ -179,7 +182,7 @@ class DiffReport:
             return ratios[mid]
         return (ratios[mid - 1] + ratios[mid]) / 2
 
-    def structural_summary(self) -> dict:
+    def structural_summary(self) -> dict[str, Any]:
         mlr = self.median_length_ratio
         return {
             "format_changes": len(self.format_changes),
@@ -190,7 +193,7 @@ class DiffReport:
             "median_length_ratio": round(mlr, 4) if mlr is not None else None,
         }
 
-    def stability_summary(self, threshold: float = 0.05) -> dict | None:
+    def stability_summary(self, threshold: float = 0.05) -> dict[str, Any] | None:
         """Noise floor and excess drift over multi-sample cases, or None if there are none.
 
         ``cases_above_noise`` counts cases whose excess drift exceeds ``threshold``
@@ -201,9 +204,9 @@ class DiffReport:
             return None
         n = len(multi)
 
-        def avg(vals):
-            vals = [v for v in vals if v is not None]
-            return round(sum(vals) / len(vals), 4) if vals else None
+        def avg(vals: Iterable[float | None]) -> float | None:
+            kept = [v for v in vals if v is not None]
+            return round(sum(kept) / len(kept), 4) if kept else None
 
         return {
             "cases": n,
@@ -212,10 +215,11 @@ class DiffReport:
             "avg_within_drift_b": avg(c.within_drift_b for c in multi),
             "avg_noise_floor": avg(c.noise_floor for c in multi),
             "avg_excess_drift": avg(c.excess_drift for c in multi),
-            "cases_above_noise": sum(c.excess_drift > threshold for c in multi),
+            "cases_above_noise": sum(c.excess_drift is not None and c.excess_drift > threshold
+                                     for c in multi),
         }
 
-    def confidence_intervals(self, level: float = 0.95) -> dict | None:
+    def confidence_intervals(self, level: float = 0.95) -> dict[str, Any] | None:
         """Bootstrap CIs (percentile method, resampling cases) for the headline rates.
 
         Returns ``{"level", "n_bootstrap", "avg_drift", "regression_rate"}`` plus
@@ -226,18 +230,18 @@ class DiffReport:
             return None
         from .stats import bootstrap_cis
 
-        cols = {
+        cols: dict[str, list[float | None]] = {
             "avg_drift": [c.drift_score for c in self.cases],
             "regression_rate": [1.0 if self._is_regression(c) else 0.0 for c in self.cases],
         }
         if any(c.excess_drift is not None for c in self.cases):
             cols["avg_excess_drift"] = [c.excess_drift for c in self.cases]
         cis = bootstrap_cis(cols, self.n_bootstrap, self.bootstrap_seed, level)
-        out = {"level": level, "n_bootstrap": self.n_bootstrap}
+        out: dict[str, Any] = {"level": level, "n_bootstrap": self.n_bootstrap}
         out.update({k: [round(lo, 4), round(hi, 4)] for k, (lo, hi) in cis.items()})
         return out
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "version_a": self.version_a,
             "version_b": self.version_b,

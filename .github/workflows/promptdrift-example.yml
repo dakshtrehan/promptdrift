@@ -1,0 +1,78 @@
+# Dogfood workflow for the reusable promptdrift GitHub Action (action.yml at
+# the repo root). It runs the offline example on logged outputs, so it needs
+# no API key and calls no model.
+#
+# The example data contains two intentional regressions (see
+# examples/offline/README.md), so fail-on-regression is off and max-drift is
+# set high: this run is informational and stays green. In your own repository
+# keep fail-on-regression at its default of "true" and lower max-drift.
+#
+# It only ever runs inside this repository's own CI; it publishes nothing.
+
+name: promptdrift example
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  drift:
+    name: promptdrift on the offline example
+    runs-on: ubuntu-latest
+    outputs:
+      verdict: ${{ steps.drift.outputs.verdict }}
+      avg-drift: ${{ steps.drift.outputs.avg-drift }}
+      regressions: ${{ steps.drift.outputs.regressions }}
+      flips: ${{ steps.drift.outputs.flips }}
+      threshold-failures: ${{ steps.drift.outputs.threshold-failures }}
+      comment-id: ${{ steps.drift.outputs.comment-id }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Compare logged outputs with the action
+        id: drift
+        uses: ./
+        # Keys are blanked so nothing in this job can reach a paid API.
+        env:
+          OPENAI_API_KEY: ""
+          ANTHROPIC_API_KEY: ""
+        with:
+          outputs: examples/offline/outputs.jsonl
+          checks: examples/offline/checks.yaml
+          # The example data regresses on purpose; keep this run informational.
+          fail-on-regression: "false"
+          max-drift: "0.6"
+          extra-args: "--name-a v1 --name-b v2"
+          artifact-name: promptdrift-example-report
+
+  use-outputs:
+    name: read the action outputs
+    needs: drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show what the action reported
+        env:
+          VERDICT: ${{ needs.drift.outputs.verdict }}
+          AVG_DRIFT: ${{ needs.drift.outputs.avg-drift }}
+          REGRESSIONS: ${{ needs.drift.outputs.regressions }}
+          FLIPS: ${{ needs.drift.outputs.flips }}
+          FAILURES: ${{ needs.drift.outputs.threshold-failures }}
+          COMMENT_ID: ${{ needs.drift.outputs.comment-id }}
+        run: |
+          echo "verdict:            $VERDICT"
+          echo "avg drift:          $AVG_DRIFT"
+          echo "regressions:        $REGRESSIONS"
+          echo "check flips:        $FLIPS"
+          echo "threshold failures: $FAILURES"
+          echo "comment id:         ${COMMENT_ID:-none (not a pull request, or no write token)}"
+          # Example gate on an output. The example data has 2 regressions, so
+          # the verdict is "fail" here and this only reports, it never fails.
+          if [ "$VERDICT" = "ship" ]; then
+            echo "safe to ship"
+          else
+            echo "needs a look (expected for the example data)"
+          fi

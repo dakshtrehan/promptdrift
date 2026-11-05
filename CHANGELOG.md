@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.3.0] - 2026-11-05
+
+Not yet published to PyPI. See RELEASE.md for the release checklist.
+
+### Added
+- **GitHub Action.** `uses: dakshtrehan/promptdrift@<ref>` (a composite action at the repository root, helpers in `action/`) runs promptdrift on a pull request, posts or updates one summary comment with drift, check flips, format changes and confidence intervals, writes the job summary, uploads the HTML, JSON, JUnit and CSV reports as an artifact and fails on configurable thresholds. Fork PRs without a write token get a warning instead of a failure, and so does any other GitHub API failure while posting the comment (5xx, 429, a timeout); the outputs are written before the comment is attempted. Only a comment that starts with the marker and was written by a Bot account or by the token's own user is updated. Report files already in `report-dir` are deleted before promptdrift runs, so a stale or committed `report.json` is never shown as the current run. Boolean inputs (`judge`, `fail-on-regression`) accept `true`, `yes`, `on` or `1` in any case. When promptdrift is not importable from the action's Python (`install: skip`), the thresholds are re-checked with a built-in copy of the rules and a warning. The action's `uses:` steps target Node.js 24 (`actions/setup-python@v6`, `actions/upload-artifact@v6`) and need GitHub Actions runner 2.327.1 or newer. See `action/README.md`. `.github/workflows/promptdrift-example.yml` dogfoods the action on the offline example in this repository's own CI.
+- **Threshold gates.** `--max-drift X`, `--max-regressions N`, `--max-format-changes N` and `--max-flips N` on `compare` and `diff`; each breach prints a readable sentence to stderr and the exit code is 1. New module `promptdrift.thresholds` with `evaluate_thresholds()`, which also accepts a saved `report.json`.
+- **Self-contained HTML report.** `render_html()` / `save_html()` and `--html FILE` write one file with inline CSS and vanilla JavaScript and no network requests: verdict header, summary cards, bootstrap CI bars, per-tag breakdown, and a sortable, filterable case table whose rows expand into side-by-side word-level diffs. Light and dark mode with a persisted toggle; readable with JavaScript disabled and at phone width. New module `promptdrift.html_report`.
+- **CSV and JUnit XML export.** `to_csv()` / `save_csv()` and `to_junit()` / `save_junit()` in Python, `--csv FILE` and `--junit FILE` on `compare` and `diff`. The JUnit file has one testcase per case with a failure for each regression and suite properties for the headline rates and CI bounds, so Jenkins and GitHub test reporters show results natively. New module `promptdrift.export`.
+- **Markdown report.** `render_markdown()` in the new module `promptdrift.markdown` renders a report (or a saved `report.json`) as GitHub flavoured Markdown with escaped outputs, for PR comments and step summaries. `report_from_dict()` rebuilds a report from `report.json`.
+- **Watch mode.** `promptdrift watch [--interval S] [--clear] [--once] <compare|diff> ...` runs the wrapped command and re-runs it whenever a config, cases, outputs or checks file changes. Pure Python polling by default; `pip install promptdrift[watch]` adds watchdog for faster wake-ups. Regressions never stop the loop (the exit code is shown in the status line), Ctrl-C exits 0, and a cost warning is printed before live runs. New module `promptdrift.watch` with `watch_files()` for programmatic use.
+- **pytest plugin.** `pytest --promptdrift outputs.jsonl` adds one test per case (`promptdrift::<file>::<case_id>`, failing on regressions with a readable message) plus a per-file summary test gated by `--promptdrift-max-drift` and `--promptdrift-max-regressions`; `--promptdrift-checks`, `--promptdrift-json` and `--promptdrift-html` save checks and reports. Items carry the `promptdrift` marker, work with `-m` and `-k` and appear in `--junit-xml`. A `promptdrift_report` fixture exposes the `DiffReport`. The plugin is auto-loaded once promptdrift is installed and is inert unless `--promptdrift` is given.
+- `promptdrift.testing.assert_no_regressions(report, max_drift=None, max_regressions=0, max_format_changes=None, max_flips=None)` (also `from promptdrift import assert_no_regressions`) raises an `AssertionError` that lists every failed threshold and regressed case, for test suites that do not use the plugin.
+- **Case tags.** An optional `tags` list on cases and offline records is carried into `CaseResult.tags` (new last field, default `None`) and drives the per-tag breakdown in the HTML report, the `tags` CSV column and the JUnit `classname`.
+- `promptdrift.reporter.verdict_for(report)` returns the SAFE TO SHIP / REVIEW / DO NOT SHIP decision as `(status, reason)` so every output format shares one rule; terminal output is unchanged.
+- **Documentation site** under `docs/` built with mkdocs-material and mkdocstrings (quickstart, concepts, recipes, CLI and API reference), deployed to GitHub Pages by `.github/workflows/docs.yml` on pushes to `main` (or a manual `workflow_dispatch` run on `main`).
+- `examples/` directory with an index README, a zero-API-key offline scenario (`examples/offline/`: 16 logged support-assistant cases with tags, checks, a multi-sample record, `run.sh` producing JSON, HTML, CSV and JUnit reports, and a captured `expected_output.txt`), a scripted-provider live-mode example (`examples/live/mock_provider.py`), a Python API script and CI samples (`examples/ci/`).
+- `benchmark/` comparing TF-IDF drift with optional sentence-transformer embeddings on 200 MRPC pairs, with pure Python ROC AUC, threshold search and Spearman; `benchmark/RESULTS.md` reports the real numbers (TF-IDF AUC 0.79) and records that the embedding leg could not download its model in the build environment.
+- `tags` lists on the records in `examples/outputs.jsonl` and on every record of the new offline example.
+- `tests/test_examples.py` runs every documented offline example command and `tests/test_benchmark.py` covers the benchmark metrics and script; `tests/test_action.py` drives the composite action through a mocked runner and a fake GitHub API.
+- Type hints on every public function and dataclass, `SupportsComplete` and `SupportsEmbed` protocols in `promptdrift.providers` for the duck-typed judge and embedder arguments, and a strict mypy configuration (`python -m mypy promptdrift`) enforced in CI.
+- Terminal demo (`docs/assets/demo.svg`) generated from the real output of the offline example, and HTML report screenshots under `docs/assets/`.
+- A release checklist in `RELEASE.md`.
+
+### Changed
+- `promptdrift` exports `render_html`, `save_html`, `to_csv`, `save_csv`, `to_junit`, `save_junit`, `evaluate_thresholds`, `render_markdown` and `assert_no_regressions`.
+- CI runs ruff, the test suite with coverage (promptdrift and the action helper, 90 percent minimum) on Python 3.9 to 3.13, mypy, the pytest plugin on the offline example, the examples and benchmark scripts, and the build and twine checks.
+- `watchdog` is an optional extra (`pip install promptdrift[watch]`); `mypy` and `types-PyYAML` are part of the `dev` extra.
+- New `docs` extra (mkdocs, mkdocs-material, mkdocstrings, pymdown-extensions) mirroring `docs/requirements.txt`, for building the documentation site.
+- The workflows pin the Node.js 24 majors of the GitHub actions they use (`actions/checkout@v5`, `actions/setup-python@v6`, `actions/upload-artifact@v6`, `actions/upload-pages-artifact@v5`, `actions/deploy-pages@v5`).
+- The sdist now includes `action.yml`, `action/`, `examples/` and `benchmark/` so the test suite passes from an unpacked sdist.
+- README rewritten around the offline workflow, the GitHub Action, the pytest plugin and the documentation site.
+
+### Fixed
+- `compare()` with config dicts that omit `system`, `temperature` or `max_tokens` raised `KeyError`; the same defaults as `load_config()` now apply.
+- Drift scores of identical texts could be reported as `-0.0` because of floating point rounding; drift and within-version drift are now clamped at `0.0`.
+- JUnit XML is always well-formed: characters XML 1.0 forbids (NUL, the ESC of ANSI colour codes, other C0 controls, lone surrogates) are written as visible escapes such as `\x1b`.
+- A lone UTF-16 surrogate in an output (an emoji cut in half upstream) no longer crashes `--html`, `--junit`, `save_csv(include_outputs=True)` or the Markdown step summary; it is shown as U+FFFD.
+- CSV export: text cells that start with `=`, `+`, `-`, `@`, a tab or a carriage return get a leading `'` so spreadsheets do not run them as formulas; `to_csv(..., escape_formulas=False)` keeps the raw text.
+- `render_markdown` no longer adds HTML entities or backslashes inside code spans, so JSON braces, `<`, `&` and snake_case version names show as written in PR comments, and a backtick in a version name cannot break the header line. Hostile outputs still cannot close the details block or split a table row.
+- Threshold gates compare the average drift at the 4 decimals stored in `report.json`, so the CLI exit code and the Action's PR comment always agree; a failure sentence adds decimals instead of printing the same number twice.
+- `--max-drift`, `--promptdrift-max-drift` and `evaluate_thresholds(max_drift=...)` reject values outside 0.0 to 1.0 (a percent such as `10`, negatives, NaN, infinity), which could never fail before.
+- `promptdrift watch` keeps running when a run raises: a half-saved YAML checks file is a one line input error and any other error is shown as a `watch error:` line. `diff` no longer prints a traceback for unexpected errors (use `--verbose`).
+- The HTML report stays fast on long outputs (above about 500 by 500 words the diff is made line by line first, with a note) and on many cases (debounced, cached text filter). The tag filter no longer matches `a` against a tag `a|b`, and empty tags are not shown.
+- `tags` in outputs files and case files must be a string or a list of strings or numbers; other values (numbers, booleans, mappings, nested lists) are rejected with a message naming the record instead of a traceback or invented tags. None and empty entries in a list are skipped.
+- With `--json`, the "saved" lines of `-o`, `--html`, `--csv` and `--junit` go to stderr, so stdout stays one JSON document.
+- Running with stdout closed (`promptdrift ... >&-`) exits with the command's own code again instead of 1 with a traceback.
+- `pytest --promptdrift` counts the generated items in `collected N items`, `--collect-only` and the `-k`/`-m` selection line.
+- A blank `ANTHROPIC_API_KEY` is passed to the Anthropic SDK as unset, so it fails before sending a request when no credentials are configured.
+
 ## [0.2.0] - 2026-11-04
 
 Not yet published to PyPI. See RELEASE.md for the publishing steps.

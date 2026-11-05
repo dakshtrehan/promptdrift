@@ -3,6 +3,8 @@ Terminal and JSON reporting.
 """
 from __future__ import annotations
 
+from typing import Optional, TextIO
+
 from .core import DiffReport
 from .version import __version__
 
@@ -19,6 +21,33 @@ VERDICT_STR = {"improved": f"{GRN}↑ improved{R}", "regressed": f"{RED}↓ regr
                "error": f"{DIM}! judge error{R}", None: f"{DIM}-{R}"}
 
 
+VERDICT_LABEL = {"safe": "SAFE TO SHIP", "review": "REVIEW", "do_not_ship": "DO NOT SHIP"}
+
+
+def verdict_for(report: DiffReport) -> tuple[str, str]:
+    """Overall verdict as ``(status, reason)``.
+
+    ``status`` is ``"safe"``, ``"review"`` or ``"do_not_ship"`` (see
+    ``VERDICT_LABEL`` for the display names) and ``reason`` is the short
+    explanation the terminal, HTML and JUnit reports show. The rule: any
+    regression means do not ship; otherwise average drift of 5 percent or more,
+    a format change or an order-inconsistent judge verdict means review.
+    """
+    nr = len(report.regressions)
+    dp = round(report.avg_drift * 100, 1)
+    flags = []
+    if report.format_changes:
+        flags.append(f"{len(report.format_changes)} format change(s)")
+    if report.inconsistent:
+        flags.append(f"{len(report.inconsistent)} order-inconsistent judge verdict(s)")
+    if nr == 0 and dp < 5 and not flags:
+        return "safe", "no regressions, minimal drift"
+    if nr == 0:
+        why = ", ".join((["semantic drift"] if dp >= 5 else []) + flags)
+        return "review", f"{why}, no regressions"
+    return "do_not_ship", f"{nr} regression(s) detected"
+
+
 def _bar(v: float, w: int = 22, color: str = GRN) -> str:
     filled = round(v * w)
     return color + "█" * filled + DIM + "░" * (w - filled) + R
@@ -29,7 +58,8 @@ def _trunc(s: str, n: int = 72) -> str:
     return s[:n-3] + "..." if len(s) > n else s
 
 
-def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool = False):
+def print_report(report: DiffReport, show_cases: bool = True,
+                 show_outputs: bool = False) -> None:
     W = 72
     print()
     print(f"{BOLD}{ORG}{'━' * W}{R}")
@@ -51,7 +81,7 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     print(f"  {'─' * (W-2)}")
     ci = report.confidence_intervals() or {}
 
-    def ci_s(key):
+    def ci_s(key: str) -> str:
         if key not in ci:
             return ""
         lo, hi = ci[key]
@@ -75,18 +105,13 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     _print_judge(report)
 
     # Overall verdict
-    flags = []
-    if report.format_changes:
-        flags.append(f"{len(report.format_changes)} format change(s)")
-    if report.inconsistent:
-        flags.append(f"{len(report.inconsistent)} order-inconsistent judge verdict(s)")
-    if nr == 0 and dp < 5 and not flags:
-        verdict = f"{GRN}{BOLD}  ✓  SAFE TO SHIP: no regressions, minimal drift{R}"
-    elif nr == 0:
-        why = ", ".join((["semantic drift"] if dp >= 5 else []) + flags)
-        verdict = f"{YLW}{BOLD}  ⚡  REVIEW: {why}, no regressions{R}"
+    status, reason = verdict_for(report)
+    if status == "safe":
+        verdict = f"{GRN}{BOLD}  ✓  SAFE TO SHIP: {reason}{R}"
+    elif status == "review":
+        verdict = f"{YLW}{BOLD}  ⚡  REVIEW: {reason}{R}"
     else:
-        verdict = f"{RED}{BOLD}  ✗  DO NOT SHIP: {nr} regression(s) detected{R}"
+        verdict = f"{RED}{BOLD}  ✗  DO NOT SHIP: {reason}{R}"
 
     print(f"  {'─' * (W-2)}")
     print(verdict)
@@ -154,7 +179,7 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     _footer(W)
 
 
-def _print_structural(report: DiffReport):
+def _print_structural(report: DiffReport) -> None:
     if not any(c.signature_a is not None for c in report.cases):
         return
     st = report.structural_summary()
@@ -168,7 +193,7 @@ def _print_structural(report: DiffReport):
     print()
 
 
-def _print_checks(report: DiffReport):
+def _print_checks(report: DiffReport) -> None:
     cs = report.checks_summary()
     if cs is None:
         return
@@ -180,11 +205,11 @@ def _print_checks(report: DiffReport):
     print()
 
 
-def _print_stability(report: DiffReport):
+def _print_stability(report: DiffReport) -> None:
     st = report.stability_summary()
     if st is None:
         return
-    def pct(v):
+    def pct(v: float | None) -> str:
         return "n/a" if v is None else f"{round(v * 100, 1)}%"
     ec = YLW if (st["avg_excess_drift"] or 0) > 0.05 else DIM
     print(f"  {BOLD}Stability{R}  n={st['samples_per_side']}/side   "
@@ -195,7 +220,7 @@ def _print_stability(report: DiffReport):
     print()
 
 
-def _print_judge(report: DiffReport):
+def _print_judge(report: DiffReport) -> None:
     js = report.judge_summary()
     if js is None:
         return
@@ -208,15 +233,20 @@ def _print_judge(report: DiffReport):
     print()
 
 
-def _footer(w: int):
+def _footer(w: int) -> None:
     print(f"{BOLD}{ORG}{'━' * w}{R}\n")
 
 
-def print_json(report: DiffReport):
+def print_json(report: DiffReport) -> None:
     print(report.to_json())
 
 
-def save_report(report: DiffReport, path: str):
+def save_report(report: DiffReport, path: str, *, stream: Optional[TextIO] = None) -> None:
+    """Write ``report.to_json()`` to ``path`` and print a status line.
+
+    The status line goes to ``stream`` (stdout by default); the CLI passes
+    stderr in ``--json`` mode so stdout stays one valid JSON document.
+    """
     with open(path, "w") as f:
         f.write(report.to_json())
-    print(f"  {GRN}✓{R} Report saved → {BOLD}{path}{R}")
+    print(f"  {GRN}✓{R} Report saved → {BOLD}{path}{R}", file=stream)
