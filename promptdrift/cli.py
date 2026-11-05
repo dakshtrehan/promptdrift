@@ -6,6 +6,8 @@ Usage:
   promptdrift compare v1.yaml v2.yaml --cases golden.json --no-judge --output report.json
   promptdrift compare v1.yaml v2.yaml --cases golden.json --fail-on-regression  # CI mode
   promptdrift diff outputs.jsonl                     # offline, no model calls
+  promptdrift diff outputs.jsonl --html report.html  # self-contained HTML report
+  promptdrift diff outputs.jsonl --csv cases.csv --junit junit.xml  # CI exports
   promptdrift init --dir ./prompts
 """
 from __future__ import annotations
@@ -62,10 +64,32 @@ def _emit(report, args):
 
     if args.output:
         save_report(report, args.output)
+    _emit_exports(report, args)
 
     # Exit 1 in CI if regressions found
     if report.regressions and args.fail_on_regression:
         sys.exit(1)
+
+
+def _emit_exports(report, args):
+    """Write --html, --csv and --junit files when asked (all optional)."""
+    from .reporter import BOLD, GRN, R
+
+    html_path = getattr(args, "html", None)
+    csv_path = getattr(args, "csv", None)
+    junit_path = getattr(args, "junit", None)
+    if html_path:
+        from .html_report import save_html
+        save_html(report, html_path)
+        print(f"  {GRN}✓{R} HTML report saved → {BOLD}{html_path}{R}")
+    if csv_path:
+        from .export import save_csv
+        save_csv(report, csv_path)
+        print(f"  {GRN}✓{R} CSV saved → {BOLD}{csv_path}{R}")
+    if junit_path:
+        from .export import save_junit
+        save_junit(report, junit_path)
+        print(f"  {GRN}✓{R} JUnit XML saved → {BOLD}{junit_path}{R}")
 
 
 def cmd_diff(args):
@@ -181,6 +205,11 @@ def _add_output_args(p):
                    help="Default deterministic checks (JSON/YAML) for cases without their own")
     p.add_argument("--json", action="store_true", help="Output raw JSON")
     p.add_argument("--output", "-o", metavar="FILE", help="Save report to JSON file")
+    p.add_argument("--html", metavar="FILE",
+                   help="Save a self-contained HTML report (no external requests)")
+    p.add_argument("--csv", metavar="FILE", help="Save one row per case as CSV")
+    p.add_argument("--junit", metavar="FILE",
+                   help="Save JUnit XML (one testcase per case, failures = regressions)")
     p.add_argument("--summary", action="store_true", help="Summary only, no per-case details")
     p.add_argument("--show-outputs", action="store_true",
                    help="Show truncated A/B outputs per case")
@@ -200,6 +229,7 @@ examples:
   promptdrift compare v1.yaml v2.yaml --cases golden.json --fail-on-regression
   promptdrift compare v1.yaml v2.yaml --cases golden.json --json -o report.json
   promptdrift diff outputs.jsonl --name-a old --name-b new
+  promptdrift diff outputs.jsonl --html report.html --csv cases.csv --junit junit.xml
   promptdrift init --dir ./prompts
         """,
     )

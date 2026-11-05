@@ -53,6 +53,7 @@ def load_cases(path: str | Path) -> list[dict]:
 
     Each case needs at least 'input'. 'id' is auto-assigned if missing.
     'expected' is optional metadata, passed to the judge for context.
+    'tags' is an optional list of labels used for per-tag breakdowns.
 
     Example:
         [
@@ -76,6 +77,8 @@ def load_cases(path: str | Path) -> list[dict]:
             raise ValueError(f"Case {i}: missing 'input' field.")
         if "id" not in c:
             c["id"] = f"case_{i+1}"
+        if "tags" in c and c["tags"] is not None and not isinstance(c["tags"], (list, str)):
+            raise ValueError(f"Case {i}: 'tags' must be a list of strings.")
     return cases
 
 

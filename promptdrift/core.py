@@ -75,6 +75,8 @@ class CaseResult:
     judge_verdict_ab: str | None = None
     judge_verdict_ba: str | None = None
     judge_consistent: bool | None = None
+    # optional labels from the case (``"tags": ["math", "json"]``) for per-tag breakdowns
+    tags: list[str] | None = None
 
 
 @dataclass

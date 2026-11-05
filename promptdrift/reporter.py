@@ -19,6 +19,33 @@ VERDICT_STR = {"improved": f"{GRN}↑ improved{R}", "regressed": f"{RED}↓ regr
                "error": f"{DIM}! judge error{R}", None: f"{DIM}-{R}"}
 
 
+VERDICT_LABEL = {"safe": "SAFE TO SHIP", "review": "REVIEW", "do_not_ship": "DO NOT SHIP"}
+
+
+def verdict_for(report: DiffReport) -> tuple[str, str]:
+    """Overall verdict as ``(status, reason)``.
+
+    ``status`` is ``"safe"``, ``"review"`` or ``"do_not_ship"`` (see
+    ``VERDICT_LABEL`` for the display names) and ``reason`` is the short
+    explanation the terminal, HTML and JUnit reports show. The rule: any
+    regression means do not ship; otherwise average drift of 5 percent or more,
+    a format change or an order-inconsistent judge verdict means review.
+    """
+    nr = len(report.regressions)
+    dp = round(report.avg_drift * 100, 1)
+    flags = []
+    if report.format_changes:
+        flags.append(f"{len(report.format_changes)} format change(s)")
+    if report.inconsistent:
+        flags.append(f"{len(report.inconsistent)} order-inconsistent judge verdict(s)")
+    if nr == 0 and dp < 5 and not flags:
+        return "safe", "no regressions, minimal drift"
+    if nr == 0:
+        why = ", ".join((["semantic drift"] if dp >= 5 else []) + flags)
+        return "review", f"{why}, no regressions"
+    return "do_not_ship", f"{nr} regression(s) detected"
+
+
 def _bar(v: float, w: int = 22, color: str = GRN) -> str:
     filled = round(v * w)
     return color + "█" * filled + DIM + "░" * (w - filled) + R
@@ -75,18 +102,13 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     _print_judge(report)
 
     # Overall verdict
-    flags = []
-    if report.format_changes:
-        flags.append(f"{len(report.format_changes)} format change(s)")
-    if report.inconsistent:
-        flags.append(f"{len(report.inconsistent)} order-inconsistent judge verdict(s)")
-    if nr == 0 and dp < 5 and not flags:
-        verdict = f"{GRN}{BOLD}  ✓  SAFE TO SHIP: no regressions, minimal drift{R}"
-    elif nr == 0:
-        why = ", ".join((["semantic drift"] if dp >= 5 else []) + flags)
-        verdict = f"{YLW}{BOLD}  ⚡  REVIEW: {why}, no regressions{R}"
+    status, reason = verdict_for(report)
+    if status == "safe":
+        verdict = f"{GRN}{BOLD}  ✓  SAFE TO SHIP: {reason}{R}"
+    elif status == "review":
+        verdict = f"{YLW}{BOLD}  ⚡  REVIEW: {reason}{R}"
     else:
-        verdict = f"{RED}{BOLD}  ✗  DO NOT SHIP: {nr} regression(s) detected{R}"
+        verdict = f"{RED}{BOLD}  ✗  DO NOT SHIP: {reason}{R}"
 
     print(f"  {'─' * (W-2)}")
     print(verdict)

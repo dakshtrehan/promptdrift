@@ -9,8 +9,8 @@ For multi-sample stability, ``output_a`` and ``output_b`` may be lists of
 samples: ``{"case_id": "greet", "output_a": ["Hi", "Hello"], "output_b": [...]}``.
 
 Optional fields per record: ``input`` and ``expected`` (context for the
-report and the optional judge) and ``checks`` (deterministic checks, see
-``promptdrift.checks``).
+report and the optional judge), ``checks`` (deterministic checks, see
+``promptdrift.checks``) and ``tags`` (a list of labels for per-tag breakdowns).
 """
 from __future__ import annotations
 
@@ -120,6 +120,8 @@ def compare_outputs(
                 "expected": rec.get("expected")}
         if "checks" in rec:
             case["checks"] = rec["checks"]
+        if rec.get("tags") is not None:
+            case["tags"] = rec["tags"]
         report.cases.append(score_case(case, rec["output_a"], rec["output_b"], judge=judge,
                                        embedder=embedder,
                                        default_checks=checks,

@@ -82,7 +82,8 @@ def score_case(
     ``embedder`` is a provider with ``embed``, or ``None`` for TF-IDF.
     ``case["checks"]`` (or ``default_checks`` when the case has none) are
     deterministic checks run on every sample; a side passes when at least half
-    of its samples pass.
+    of its samples pass. ``case["tags"]`` (a list of strings, or one string) is
+    carried into ``CaseResult.tags`` for per-tag breakdowns.
     """
     sa, sb = _as_samples(output_a), _as_samples(output_b)
     first_a, first_b = sa[0], sb[0]
@@ -168,4 +169,15 @@ def score_case(
         **chk,
         **stab,
         **jinfo,
+        tags=_case_tags(case),
     )
+
+
+def _case_tags(case: dict) -> list[str] | None:
+    """Normalise ``case["tags"]`` to a list of strings, or None when absent."""
+    raw = case.get("tags")
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        raw = [raw]
+    return [str(t) for t in raw]
