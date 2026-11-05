@@ -217,7 +217,10 @@ def test_html_skipped_when_module_missing(pytester, monkeypatch):
     f = _write(pytester, [ROWS[0]])
     monkeypatch.setitem(sys.modules, "promptdrift.html_report", None)
     result = _run(pytester, "--promptdrift", f, "--promptdrift-html", "report.html")
-    result.assert_outcomes(passed=2, warnings=1)
+    # The warning count is not asserted: the in-process run also emits pytest's
+    # "module already imported so cannot be rewritten" warning for the plugin
+    # when an earlier test imported it, which depends on test order.
+    result.assert_outcomes(passed=2)
     assert "--promptdrift-html ignored" in result.stdout.str()
     assert not (pytester.path / "report.html").exists()
 

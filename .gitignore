@@ -16,3 +16,6 @@ htmlcov/
 
 # reports written by examples/offline/run.sh
 examples/offline/out/
+
+# mkdocs build output
+site/
