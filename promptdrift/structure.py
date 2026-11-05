@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any, Union
 
 __all__ = ["strip_fence", "format_signature", "signature_string", "is_valid_json",
            "length_ratio", "structural_diff"]
@@ -16,7 +17,7 @@ __all__ = ["strip_fence", "format_signature", "signature_string", "is_valid_json
 _FENCE = re.compile(r"^```[\w+-]*[ \t]*\n(.*?)\n?```$", re.DOTALL)
 _LIST_ITEM = re.compile(r"^\s*([-*+•]|\d+[.)])\s+")
 _HEADING = re.compile(r"^\s{0,3}#{1,6}\s+\S", re.MULTILINE)
-_JSON_TYPES = {dict: "object", list: "array"}
+_JSON_TYPES: dict[type[Any], str] = {dict: "object", list: "array"}
 
 
 def strip_fence(text: str) -> tuple[str, bool]:
@@ -48,7 +49,7 @@ def is_valid_json(text: str) -> bool:
     return _json_type(strip_fence(text)[0]) is not None
 
 
-def format_signature(text: str) -> dict:
+def format_signature(text: str) -> dict[str, Any]:
     """Describe the surface format of an output.
 
     Keys: ``fence`` (wrapped in a markdown code fence), ``json_type`` (``object``,
@@ -76,7 +77,7 @@ def _line_bucket(n: int) -> str:
     return "5+"
 
 
-def signature_string(sig_or_text) -> str:
+def signature_string(sig_or_text: Union[str, dict[str, Any]]) -> str:
     """Compact, comparable form of a signature, for example ``fence+json:object+lines:5+``.
 
     Line count is bucketed (1, 2-4, 5+) so that one extra sentence does not count
@@ -109,7 +110,7 @@ def length_ratio(text_a: str, text_b: str) -> float | None:
     return round(lb / la, 4)
 
 
-def structural_diff(text_a: str, text_b: str) -> dict:
+def structural_diff(text_a: str, text_b: str) -> dict[str, Any]:
     """Structural comparison of two outputs.
 
     Returns ``signature_a``, ``signature_b``, ``format_changed``, ``json_valid_a``,

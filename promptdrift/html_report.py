@@ -22,7 +22,7 @@ import html
 import re
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Union
+from typing import Iterable, Optional, Sequence, Union
 
 from .core import CaseResult, DiffReport
 from .reporter import VERDICT_LABEL, verdict_for
@@ -45,7 +45,8 @@ def _tokens(text: str) -> tuple[list[str], list[str]]:
     Returns ``(words, gaps)`` of equal length; ``gaps[i]`` is the whitespace
     after ``words[i]``. Leading whitespace is attached to a first empty word.
     """
-    words, gaps = [], []
+    words: list[str] = []
+    gaps: list[str] = []
     lead = len(text) - len(text.lstrip())
     if lead:
         words.append("")
@@ -56,13 +57,14 @@ def _tokens(text: str) -> tuple[list[str], list[str]]:
     return words, gaps
 
 
-def _render_side(words, gaps, marks, tag: str) -> str:
+def _render_side(words: Sequence[str], gaps: Sequence[str], marks: Sequence[bool],
+                 tag: str) -> str:
     """Join words back with their own whitespace, wrapping marked runs in ``tag``.
 
     A run of consecutive marked words shares one tag; the whitespace after the
     last marked word stays outside it so the highlight hugs the words.
     """
-    out = []
+    out: list[str] = []
     open_run = False
     n = len(words)
     for i, (word, gap, marked) in enumerate(zip(words, gaps, marks)):
@@ -102,11 +104,11 @@ def word_diff(a: str, b: str) -> tuple[str, str]:
 
 
 # ── Small formatting helpers ─────────────────────────────────────────────────
-def _pct(v, digits: int = 1) -> str:
+def _pct(v: Optional[float], digits: int = 1) -> str:
     return "n/a" if v is None else f"{round(v * 100, digits)}%"
 
 
-def _num(v, digits: int = 4) -> str:
+def _num(v: object, digits: int = 4) -> str:
     if v is None:
         return "n/a"
     if isinstance(v, bool):
@@ -124,7 +126,7 @@ def _level_badge(level: str) -> str:
     return _badge(level, level if level in _LEVEL_RANK else "none")
 
 
-def _verdict_badge(verdict) -> str:
+def _verdict_badge(verdict: Optional[str]) -> str:
     if verdict is None:
         return '<span class="muted">-</span>'
     kind = {"improved": "good", "regressed": "bad", "inconsistent": "warn",
@@ -132,7 +134,7 @@ def _verdict_badge(verdict) -> str:
     return _badge(verdict, kind)
 
 
-def _flip_badge(flip) -> str:
+def _flip_badge(flip: Optional[str]) -> str:
     if not flip:
         return '<span class="muted">-</span>'
     return _badge(flip.replace("_", " "), "bad" if flip == "pass_to_fail" else "good")
@@ -146,7 +148,7 @@ def _pre(text: str, inner_html: Union[str, None] = None) -> str:
     return f'<pre class="out" dir="auto">{body}</pre>'
 
 
-def _tag_chips(tags) -> str:
+def _tag_chips(tags: Optional[Iterable[str]]) -> str:
     if not tags:
         return ""
     return "".join(f'<span class="tag">{_e(t)}</span>' for t in tags)
@@ -235,7 +237,7 @@ def _summary_cards(report: DiffReport) -> str:
     return '<section class="cards">' + "".join(cards) + "</section>\n"
 
 
-def _ci_bar(label: str, value: float, ci, kind: str) -> str:
+def _ci_bar(label: str, value: float, ci: Optional[Sequence[float]], kind: str) -> str:
     fill = _clamp_pct(value)
     marker = ""
     ci_text = ""
@@ -271,7 +273,7 @@ def _ci_section(report: DiffReport) -> str:
 
 
 def _tag_section(report: DiffReport) -> str:
-    rows: dict = {}
+    rows: dict[str, list[CaseResult]] = {}
     for c in report.cases:
         for t in c.tags or []:
             rows.setdefault(t, []).append(c)
@@ -318,7 +320,7 @@ def _checks_table(c: CaseResult) -> str:
             + "</tbody></table>" + rates)
 
 
-def _pass(v) -> str:
+def _pass(v: Optional[bool]) -> str:
     if v is None:
         return '<span class="muted">-</span>'
     return '<span class="good">pass</span>' if v else '<span class="bad">fail</span>'
@@ -429,7 +431,7 @@ def _case_section(report: DiffReport) -> str:
     verdicts = sorted({c.judge_verdict for c in report.cases if c.judge_verdict})
     tags = sorted({t for c in report.cases for t in (c.tags or [])})
 
-    def options(values):
+    def options(values: Iterable[str]) -> str:
         return "".join(f'<option value="{_e(v)}">{_e(v)}</option>' for v in values)
 
     controls = (

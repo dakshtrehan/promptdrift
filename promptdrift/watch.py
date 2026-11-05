@@ -30,7 +30,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Iterable, Optional, Sequence, Union
+from typing import Any, Callable, Iterable, Mapping, Optional, Sequence, TextIO, Union
 
 __all__ = ["watch_files", "snapshot", "changed_paths", "run_wrapped", "run_watch",
            "COST_WARNING", "CLEAR_SCREEN"]
@@ -60,7 +60,7 @@ def snapshot(paths: Iterable[PathLike]) -> dict[str, Optional[tuple[int, int]]]:
     return out
 
 
-def changed_paths(before: dict, after: dict) -> list[str]:
+def changed_paths(before: Mapping[str, Any], after: Mapping[str, Any]) -> list[str]:
     """Paths whose snapshot entry differs between two ``snapshot`` results."""
     return [p for p in after if before.get(p) != after[p]]
 
@@ -76,8 +76,9 @@ class _WatchdogWaker:
         self.event = threading.Event()
         waker = self.event
 
-        class _Handler(FileSystemEventHandler):
-            def on_any_event(self, event):  # pragma: no cover - exercised through a fake
+        # watchdog is optional and untyped here, so the base class is Any to mypy.
+        class _Handler(FileSystemEventHandler):  # type: ignore[misc]
+            def on_any_event(self, event: Any) -> None:  # pragma: no cover - via a fake
                 waker.set()
 
         self.observer = Observer()
@@ -104,7 +105,8 @@ class _WatchdogWaker:
             pass
 
 
-def _make_waker(paths: Sequence[str], backend: str, stop: threading.Event):
+def _make_waker(paths: Sequence[str], backend: str,
+                stop: threading.Event) -> Optional[_WatchdogWaker]:
     if backend == "poll":
         return None
     try:
@@ -198,7 +200,7 @@ def run_watch(
     once: bool = False,
     warning: Optional[str] = None,
     stop_event: Optional[threading.Event] = None,
-    out=None,
+    out: Optional[TextIO] = None,
     backend: str = "auto",
 ) -> int:
     """Drive ``func`` through ``watch_files`` with status lines on ``out``.

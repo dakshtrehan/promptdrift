@@ -5,18 +5,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, Union
 
 import yaml
 
 from .core import DiffReport
 from .judge import judge_pair, resolve_judge
-from .providers import BaseProvider, get_provider
+from .providers import BaseProvider, SupportsComplete, get_provider
 from .scoring import score_case
 from .similarity import text_similarity, tfidf_similarity
 
 
 # ── Config / case loaders ─────────────────────────────────────────────────────
-def load_config(path: str | Path) -> dict:
+def load_config(path: str | Path) -> dict[str, Any]:
     """
     Load a prompt config (YAML or JSON).
 
@@ -36,7 +37,8 @@ def load_config(path: str | Path) -> dict:
     """
     p = Path(path)
     with open(p) as f:
-        cfg = yaml.safe_load(f) if p.suffix in (".yaml", ".yml") else json.load(f)
+        cfg: dict[str, Any] = (yaml.safe_load(f) if p.suffix in (".yaml", ".yml")
+                               else json.load(f))
     required = ["version", "provider", "model", "prompt_template"]
     missing = [k for k in required if k not in cfg]
     if missing:
@@ -47,7 +49,7 @@ def load_config(path: str | Path) -> dict:
     return cfg
 
 
-def load_cases(path: str | Path) -> list[dict]:
+def load_cases(path: str | Path) -> list[dict[str, Any]]:
     """
     Load test cases from JSON, JSONL, or YAML.
 
@@ -111,7 +113,7 @@ def render_prompt(template: str, inp: str) -> str:
 
 
 # ── Embedding provider resolution ─────────────────────────────────────────────
-def _resolve_embedder(cfg: dict) -> BaseProvider | None:
+def _resolve_embedder(cfg: dict[str, Any]) -> BaseProvider | None:
     """
     Try to build an embedding provider for the given config.
     Returns None if no embedding provider is reachable; caller should fall back to TF-IDF.
@@ -131,22 +133,22 @@ def _resolve_embedder(cfg: dict) -> BaseProvider | None:
         return None
 
 
-def cfg_embedding_requested(*configs) -> bool:
+def cfg_embedding_requested(*configs: Any) -> bool:
     """True if any already-loaded config dict sets ``embedding_model``."""
     return any(isinstance(c, dict) and c.get("embedding_model") for c in configs)
 
 
 # ── Main compare function ─────────────────────────────────────────────────────
 def compare(
-    config_a: str | Path | dict,
-    config_b: str | Path | dict,
-    cases: str | Path | list[dict],
+    config_a: str | Path | dict[str, Any],
+    config_b: str | Path | dict[str, Any],
+    cases: str | Path | list[dict[str, Any]],
     *,
     use_judge: bool = True,
-    judge_provider: str | BaseProvider | None = None,
+    judge_provider: str | SupportsComplete | None = None,
     judge_model: str | None = None,
     verbose: bool = True,
-    checks=None,
+    checks: Union[list[dict[str, Any]], dict[str, Any], None] = None,
     samples: int = 1,
     bootstrap: int = 1000,
     seed: int = 0,

@@ -39,7 +39,7 @@ CSV_COLUMNS = [
 OUTPUT_COLUMNS = ["input", "output_a", "output_b"]
 
 
-def _cell(value) -> str:
+def _cell(value: object) -> str:
     """Render one scalar for CSV: None becomes empty, bools become true/false."""
     if value is None:
         return ""
@@ -105,7 +105,7 @@ def save_csv(report: DiffReport, path: Union[str, Path], include_outputs: bool =
 # ── JUnit XML ────────────────────────────────────────────────────────────────
 def failure_reason(c: CaseResult) -> Optional[str]:
     """Why a case counts as a regression, or None when it does not."""
-    reasons = []
+    reasons: list[str] = []
     if c.judge_verdict == "regressed":
         reasons.append("judge regressed")
     if c.check_flip == "pass_to_fail":
@@ -138,7 +138,7 @@ def _case_summary(c: CaseResult) -> str:
     return f"{c.case_id}: " + " ".join(bits)
 
 
-def _fmt(value) -> str:
+def _fmt(value: object) -> str:
     return "" if value is None else str(value)
 
 

@@ -8,6 +8,7 @@ import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any, Protocol
 
 
 @dataclass
@@ -25,9 +26,29 @@ class EmbedResponse:
     model: str = ""
 
 
+class SupportsComplete(Protocol):
+    """Anything that can act as a generator or judge: ``complete(system, prompt, **kwargs)``.
+
+    The return value only needs a ``text`` attribute, so every provider here,
+    and any object a caller writes, satisfies it. Used for the ``judge_provider``
+    arguments and the judge helpers.
+    """
+
+    def complete(self, system: str, prompt: str, **kwargs: Any) -> Any: ...
+
+
+class SupportsEmbed(Protocol):
+    """Anything with ``embed(text)`` returning an object with a ``vector`` attribute.
+
+    Used for the ``embedder`` arguments of the offline and scoring APIs.
+    """
+
+    def embed(self, text: str) -> Any: ...
+
+
 class BaseProvider(ABC):
     @abstractmethod
-    def complete(self, system: str, prompt: str, **kwargs) -> LLMResponse:
+    def complete(self, system: str, prompt: str, **kwargs: Any) -> LLMResponse:
         pass
 
     @abstractmethod
@@ -47,7 +68,7 @@ class OpenAIProvider(BaseProvider):
         self.model = model
         self.embed_model = embed_model
 
-    def complete(self, system: str, prompt: str, **kwargs) -> LLMResponse:
+    def complete(self, system: str, prompt: str, **kwargs: Any) -> LLMResponse:
         t0 = time.time()
         r = self.client.chat.completions.create(
             model=self.model,
@@ -111,7 +132,7 @@ class AnthropicProvider(BaseProvider):
 
     def __init__(self, model: str = "claude-haiku-4-5-20251001",
                  api_key: str | None = None, temperature_supported: bool | None = None,
-                 client=None):
+                 client: Any = None):
         if client is None:
             try:
                 import anthropic
@@ -129,15 +150,15 @@ class AnthropicProvider(BaseProvider):
             self._embed = OpenAIProvider()
         return self._embed
 
-    def build_request(self, system: str, prompt: str, **kwargs) -> dict:
+    def build_request(self, system: str, prompt: str, **kwargs: Any) -> dict[str, Any]:
         """Keyword arguments for ``client.messages.create``. Exposed for testing."""
         max_tokens = kwargs.pop("max_tokens", 1024)
         sampling = {k: kwargs.pop(k) for k in _SAMPLING_PARAMS
                     if k in kwargs and kwargs[k] is not None}
         for k in _SAMPLING_PARAMS:
             kwargs.pop(k, None)
-        req = {"model": self.model, "max_tokens": max_tokens,
-               "messages": [{"role": "user", "content": prompt}], **kwargs}
+        req: dict[str, Any] = {"model": self.model, "max_tokens": max_tokens,
+                               "messages": [{"role": "user", "content": prompt}], **kwargs}
         if system:
             req["system"] = system
         if sampling and self.temperature_supported:
@@ -149,7 +170,7 @@ class AnthropicProvider(BaseProvider):
             req["extra_headers"] = headers
         return req
 
-    def complete(self, system: str, prompt: str, **kwargs) -> LLMResponse:
+    def complete(self, system: str, prompt: str, **kwargs: Any) -> LLMResponse:
         t0 = time.time()
         r = self.client.messages.create(**self.build_request(system, prompt, **kwargs))
         text = "".join(getattr(b, "text", "") or "" for b in (r.content or [])
@@ -173,17 +194,17 @@ class OllamaProvider(BaseProvider):
         self.model = model
         self.base_url = base_url
 
-    def complete(self, system: str, prompt: str, **kwargs) -> LLMResponse:
+    def complete(self, system: str, prompt: str, **kwargs: Any) -> LLMResponse:
         import requests
         t0 = time.time()
-        options = {}
+        options: dict[str, Any] = {}
         if kwargs.get("temperature") is not None:
             options["temperature"] = kwargs["temperature"]
         if kwargs.get("max_tokens") is not None:
             options["num_predict"] = kwargs["max_tokens"]
-        body = {"model": self.model, "stream": False,
-                "messages": [{"role": "system", "content": system},
-                             {"role": "user", "content": prompt}]}
+        body: dict[str, Any] = {"model": self.model, "stream": False,
+                                "messages": [{"role": "system", "content": system},
+                                             {"role": "user", "content": prompt}]}
         if options:
             body["options"] = options
         r = requests.post(f"{self.base_url}/api/chat", json=body)
@@ -202,8 +223,9 @@ class OllamaProvider(BaseProvider):
         return EmbedResponse(vector=r.json()["embedding"], model=self.model)
 
 
-def get_provider(name: str, **kwargs) -> BaseProvider:
-    mapping = {"openai": OpenAIProvider, "anthropic": AnthropicProvider, "ollama": OllamaProvider}
+def get_provider(name: str, **kwargs: Any) -> BaseProvider:
+    mapping: dict[str, type[BaseProvider]] = {
+        "openai": OpenAIProvider, "anthropic": AnthropicProvider, "ollama": OllamaProvider}
     if name not in mapping:
         raise ValueError(f"Unknown provider '{name}'. Choose from: {list(mapping)}")
     return mapping[name](**kwargs)

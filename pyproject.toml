@@ -38,6 +38,8 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.6",
+    "mypy>=1.14",
+    "types-PyYAML>=6.0",
     "build>=1.0",
     "twine>=5.0",
     "openai>=1.0",
@@ -86,3 +88,22 @@ source = ["promptdrift"]
 [tool.coverage.report]
 fail_under = 90
 show_missing = true
+
+[tool.mypy]
+# mypy 2.x cannot target 3.9 (the oldest it accepts is 3.10); the 3.9 interpreter
+# in the CI matrix and "python -m compileall" cover 3.9 syntax compatibility.
+python_version = "3.10"
+strict = true
+packages = ["promptdrift"]
+warn_unreachable = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+# Optional SDKs and runtime-only imports (openai, anthropic, requests, watchdog)
+# are not installed in every environment and their type information changes
+# between releases. They are treated as untyped everywhere so that the type
+# gate gives the same answer with or without the extras installed.
+module = ["openai", "openai.*", "anthropic", "anthropic.*", "requests", "requests.*",
+          "watchdog", "watchdog.*"]
+ignore_missing_imports = true
+follow_imports = "skip"

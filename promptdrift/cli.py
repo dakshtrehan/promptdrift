@@ -17,9 +17,12 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any, Callable, Optional, Sequence
+
+from .core import DiffReport
 
 
-def cmd_compare(args):
+def cmd_compare(args: argparse.Namespace) -> None:
     from .compare import compare
 
     try:
@@ -54,7 +57,7 @@ def cmd_compare(args):
     _emit(report, args)
 
 
-def _emit(report, args):
+def _emit(report: DiffReport, args: argparse.Namespace) -> None:
     """Print / save a report and set the exit code. Shared by compare and diff."""
     from .reporter import print_json, print_report, save_report
 
@@ -79,17 +82,20 @@ def _emit(report, args):
         sys.exit(1)
 
 
-def _threshold_failures(report, args):
+def _threshold_failures(report: DiffReport, args: argparse.Namespace) -> list[str]:
     """Evaluate --max-* gates; getattr keeps older Namespace objects working."""
     limits = {k: getattr(args, k, None)
               for k in ("max_drift", "max_regressions", "max_format_changes", "max_flips")}
     if all(v is None for v in limits.values()):
         return []
     from .thresholds import evaluate_thresholds
-    return evaluate_thresholds(report, **limits)
+    return evaluate_thresholds(report, max_drift=limits["max_drift"],
+                               max_regressions=limits["max_regressions"],
+                               max_format_changes=limits["max_format_changes"],
+                               max_flips=limits["max_flips"])
 
 
-def _emit_exports(report, args):
+def _emit_exports(report: DiffReport, args: argparse.Namespace) -> None:
     """Write --html, --csv and --junit files when asked (all optional)."""
     from .reporter import BOLD, GRN, R
 
@@ -110,7 +116,7 @@ def _emit_exports(report, args):
         print(f"  {GRN}✓{R} JUnit XML saved → {BOLD}{junit_path}{R}")
 
 
-def cmd_diff(args):
+def cmd_diff(args: argparse.Namespace) -> None:
     """Offline mode: score stored outputs without calling any model."""
     from .offline import compare_outputs
 
@@ -138,11 +144,13 @@ def cmd_diff(args):
     _emit(report, args)
 
 
-def cmd_watch(args, parser):
+def cmd_watch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     """Re-run compare or diff whenever one of its input files changes."""
     from .watch import COST_WARNING, run_watch
 
     inner = parser.parse_args([args.wrapped] + list(args.wrapped_args))
+    run: Callable[[argparse.Namespace], None]
+    warning: Optional[str]
     if inner.command == "compare":
         paths = [inner.config_a, inner.config_b, inner.cases]
         run = cmd_compare
@@ -161,7 +169,7 @@ def cmd_watch(args, parser):
         sys.exit(code)
 
 
-def cmd_init(args):
+def cmd_init(args: argparse.Namespace) -> None:
     """Scaffold example prompt configs and test cases."""
     import yaml
     out = Path(args.dir)
@@ -212,7 +220,7 @@ def cmd_init(args):
     print(f"    promptdrift compare {out}/v1.yaml {out}/v2.yaml --cases {out}/golden.json\n")
 
 
-def _load_checks(path):
+def _load_checks(path: Optional[str]) -> Any:
     """Load a default checks spec from a JSON or YAML file (None when not given)."""
     if not path:
         return None
@@ -228,7 +236,7 @@ def _load_checks(path):
     return spec
 
 
-def _add_judge_args(p):
+def _add_judge_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--judge-provider", default=None,
                    help="openai | anthropic | ollama (default: from OPENAI_API_KEY, "
                         "else ANTHROPIC_API_KEY)")
@@ -238,7 +246,7 @@ def _add_judge_args(p):
                    help="Judge A-vs-B only (v0.1.1 behaviour) instead of both orders")
 
 
-def _add_output_args(p):
+def _add_output_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--bootstrap", type=int, default=1000, metavar="N",
                    help="Bootstrap resamples for 95%% CIs (default 1000, 0 disables)")
     p.add_argument("--seed", type=int, default=0, help="Random seed for the bootstrap")
@@ -266,7 +274,7 @@ def _add_output_args(p):
                    help="Exit 1 when more than N checks flipped from pass to fail")
 
 
-def main(argv=None):
+def main(argv: Optional[Sequence[str]] = None) -> None:
     parser = argparse.ArgumentParser(
         prog="promptdrift",
         description="⚡ Semantic diff for LLM prompts. Catch regressions before prod.",

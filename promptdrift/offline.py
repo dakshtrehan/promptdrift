@@ -16,15 +16,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Union
 
 from .core import DiffReport
 from .judge import resolve_judge
 from .scoring import score_case
 
+if TYPE_CHECKING:  # pragma: no cover - annotations only
+    from .providers import SupportsComplete, SupportsEmbed
+
 __all__ = ["load_outputs", "compare_outputs"]
 
 
-def _normalise(rec: dict, i: int) -> dict:
+def _normalise(rec: object, i: int) -> dict[str, Any]:
     if not isinstance(rec, dict):
         raise ValueError(f"Record {i + 1}: must be a JSON object.")
     rec = dict(rec)
@@ -50,7 +54,7 @@ def _normalise(rec: dict, i: int) -> dict:
     return rec
 
 
-def load_outputs(path: str | Path) -> list[dict]:
+def load_outputs(path: str | Path) -> list[dict[str, Any]]:
     """Load stored outputs from JSONL (one object per line) or a JSON array.
 
     Each record needs ``case_id`` (``id`` is accepted as an alias), ``output_a``
@@ -60,6 +64,7 @@ def load_outputs(path: str | Path) -> list[dict]:
     with open(p, encoding="utf-8") as f:
         text = f.read()
     stripped = text.lstrip()
+    records: list[Any]
     if p.suffix.lower() == ".json" or stripped.startswith("["):
         records = json.loads(text)
         if not isinstance(records, list):
@@ -77,20 +82,20 @@ def load_outputs(path: str | Path) -> list[dict]:
 
 
 def compare_outputs(
-    outputs: str | Path | list[dict],
+    outputs: str | Path | list[dict[str, Any]],
     *,
     version_a: str = "A",
     version_b: str = "B",
     model_a: str = "stored",
     model_b: str = "stored",
     use_judge: bool = False,
-    judge_provider=None,
+    judge_provider: Union[str, SupportsComplete, None] = None,
     judge_model: str | None = None,
-    checks=None,
+    checks: Union[list[dict[str, Any]], dict[str, Any], None] = None,
     bootstrap: int = 1000,
     seed: int = 0,
     judge_both_orders: bool = True,
-    embedder=None,
+    embedder: SupportsEmbed | None = None,
     verbose: bool = False,
 ) -> DiffReport:
     """Compare stored outputs. No model is called unless ``use_judge=True``.
@@ -116,8 +121,8 @@ def compare_outputs(
     for i, rec in enumerate(records):
         if verbose:
             print(f"  [{i + 1}/{len(records)}] {rec['case_id']}")
-        case = {"id": rec["case_id"], "input": rec.get("input", ""),
-                "expected": rec.get("expected")}
+        case: dict[str, Any] = {"id": rec["case_id"], "input": rec.get("input", ""),
+                                "expected": rec.get("expected")}
         if "checks" in rec:
             case["checks"] = rec["checks"]
         if rec.get("tags") is not None:

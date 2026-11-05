@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any, Union
 
 from .structure import strip_fence
 
@@ -32,7 +33,8 @@ CHECK_TYPES = ("regex", "json_keys", "exact")
 _FLAGS = {"i": re.IGNORECASE, "m": re.MULTILINE, "s": re.DOTALL}
 
 
-def normalize_checks(spec, expected: str | None = None) -> list[dict]:
+def normalize_checks(spec: Union[list[dict[str, Any]], dict[str, Any], None],
+                     expected: str | None = None) -> list[dict[str, Any]]:
     """Validate a checks spec and return it as a list of check dicts.
 
     Raises ``ValueError`` for unknown types, missing fields or a bad regex.
@@ -43,7 +45,7 @@ def normalize_checks(spec, expected: str | None = None) -> list[dict]:
         if "type" in spec:
             spec = [spec]
         else:
-            items = []
+            items: list[dict[str, Any]] = []
             for key, val in spec.items():
                 if key == "regex":
                     items.append({"type": "regex", "pattern": val})
@@ -58,7 +60,7 @@ def normalize_checks(spec, expected: str | None = None) -> list[dict]:
     if not isinstance(spec, list):
         raise ValueError("'checks' must be a list or a dict.")
 
-    out = []
+    out: list[dict[str, Any]] = []
     for raw in spec:
         if not isinstance(raw, dict) or raw.get("type") not in CHECK_TYPES:
             raise ValueError(f"Bad check {raw!r}: 'type' must be one of {list(CHECK_TYPES)}.")
@@ -93,7 +95,7 @@ def normalize_checks(spec, expected: str | None = None) -> list[dict]:
     return out
 
 
-def run_check(text: str, chk: dict) -> dict:
+def run_check(text: str, chk: dict[str, Any]) -> dict[str, Any]:
     """Run one normalized check. Returns ``{"type", "passed", "detail"}``."""
     t = chk["type"]
     if t == "regex":
@@ -122,7 +124,7 @@ def run_check(text: str, chk: dict) -> dict:
     return {"type": t, "passed": a == b, "detail": chk["value"]}
 
 
-def run_checks(text: str, checks: list[dict]) -> dict:
+def run_checks(text: str, checks: list[dict[str, Any]]) -> dict[str, Any]:
     """Run all checks. Returns ``{"passed": bool, "results": [...]}``."""
     results = [run_check(text, c) for c in checks]
     return {"passed": all(r["passed"] for r in results), "results": results}

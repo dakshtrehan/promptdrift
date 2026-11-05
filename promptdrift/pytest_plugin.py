@@ -24,9 +24,10 @@ The ``promptdrift_report`` fixture gives the ``DiffReport`` of the first
 from __future__ import annotations
 
 import json
+import os  # noqa: F401 - used in annotations
 import warnings
 from pathlib import Path
-from typing import Optional
+from typing import Any, Iterator, Optional, Union
 
 import pytest
 
@@ -45,7 +46,7 @@ class PromptdriftRegression(AssertionError):
     """Raised by a case or summary item; the message is shown as is."""
 
 
-def pytest_addoption(parser):
+def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("promptdrift", "promptdrift: LLM output regression gate")
     group.addoption("--promptdrift", action="append", default=[], metavar="PATH",
                     help="JSONL/JSON outputs file to score offline (repeatable); "
@@ -62,13 +63,13 @@ def pytest_addoption(parser):
                     help="save the self-contained HTML report here")
 
 
-def pytest_configure(config):
+def pytest_configure(config: pytest.Config) -> None:
     if config.getoption("promptdrift", default=None):
         config.addinivalue_line(
             "markers", "promptdrift: test items generated from a --promptdrift outputs file")
 
 
-def _load_checks(path: Optional[str]):
+def _load_checks(path: Optional[str]) -> Any:
     if not path:
         return None
     from .checks import normalize_checks
@@ -91,9 +92,9 @@ def _numbered(path: str, index: int, count: int) -> str:
     return str(p.with_name(f"{p.stem}-{index}{p.suffix}"))
 
 
-def build_reports(config) -> list[tuple[str, DiffReport]]:
+def build_reports(config: pytest.Config) -> list[tuple[str, DiffReport]]:
     """Score every ``--promptdrift`` file once and cache the reports on ``config``."""
-    cached = getattr(config, _KEY, None)
+    cached: Optional[list[tuple[str, DiffReport]]] = getattr(config, _KEY, None)
     if cached is not None:
         return cached
     files = config.getoption("promptdrift", default=None) or []
@@ -115,7 +116,7 @@ def build_reports(config) -> list[tuple[str, DiffReport]]:
     return reports
 
 
-def _save_outputs(config, reports: list[tuple[str, DiffReport]]) -> None:
+def _save_outputs(config: pytest.Config, reports: list[tuple[str, DiffReport]]) -> None:
     json_path = config.getoption("promptdrift_json")
     html_path = config.getoption("promptdrift_html")
     n = len(reports)
@@ -141,13 +142,13 @@ def _save_outputs(config, reports: list[tuple[str, DiffReport]]) -> None:
 class PromptdriftCaseItem(pytest.Item):
     """One test per case; fails when the case counts as a regression."""
 
-    def __init__(self, *, case: CaseResult, report: DiffReport, **kwargs):
+    def __init__(self, *, case: CaseResult, report: DiffReport, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.case = case
         self.report = report
         self.add_marker("promptdrift")
 
-    def runtest(self):
+    def runtest(self) -> None:
         reason = failure_reason(self.case)
         if reason:
             raise PromptdriftRegression(
@@ -155,12 +156,13 @@ class PromptdriftCaseItem(pytest.Item):
                 f"({self.report.version_a} vs {self.report.version_b})\n"
                 + describe_case(self.case))
 
-    def repr_failure(self, excinfo, style=None):
+    def repr_failure(self, excinfo: pytest.ExceptionInfo[BaseException],
+                     style: Optional[str] = None) -> Any:
         if isinstance(excinfo.value, PromptdriftRegression):
             return str(excinfo.value)
         return super().repr_failure(excinfo)
 
-    def reportinfo(self):
+    def reportinfo(self) -> tuple[Union["os.PathLike[str]", str], Optional[int], str]:
         return self.path, None, f"promptdrift case {self.case.case_id}"
 
 
@@ -168,14 +170,14 @@ class PromptdriftSummaryItem(pytest.Item):
     """One test per file; fails when the drift or regression thresholds are exceeded."""
 
     def __init__(self, *, report: DiffReport, max_drift: Optional[float],
-                 max_regressions: Optional[int], **kwargs):
+                 max_regressions: Optional[int], **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.report = report
         self.max_drift = max_drift
         self.max_regressions = max_regressions
         self.add_marker("promptdrift")
 
-    def runtest(self):
+    def runtest(self) -> None:
         failures = evaluate_thresholds(self.report, max_drift=self.max_drift,
                                        max_regressions=self.max_regressions)
         if failures:
@@ -186,23 +188,24 @@ class PromptdriftSummaryItem(pytest.Item):
             lines += [f"  - {f}" for f in failures]
             raise PromptdriftRegression("\n".join(lines))
 
-    def repr_failure(self, excinfo, style=None):
+    def repr_failure(self, excinfo: pytest.ExceptionInfo[BaseException],
+                     style: Optional[str] = None) -> Any:
         if isinstance(excinfo.value, PromptdriftRegression):
             return str(excinfo.value)
         return super().repr_failure(excinfo)
 
-    def reportinfo(self):
+    def reportinfo(self) -> tuple[Union["os.PathLike[str]", str], Optional[int], str]:
         return self.path, None, "promptdrift summary"
 
 
 class PromptdriftFile(pytest.File):
     """Collector for one ``--promptdrift`` outputs file."""
 
-    def __init__(self, *, report: DiffReport, **kwargs):
+    def __init__(self, *, report: DiffReport, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.report = report
 
-    def collect(self):
+    def collect(self) -> Iterator[pytest.Item]:
         config = self.config
         for case in self.report.cases:
             yield PromptdriftCaseItem.from_parent(
@@ -214,7 +217,8 @@ class PromptdriftFile(pytest.File):
 
 
 @pytest.hookimpl(tryfirst=True)
-def pytest_collection_modifyitems(session, config, items):
+def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config,
+                                  items: list[pytest.Item]) -> None:
     # tryfirst so that -m, -k and other deselection hooks see the generated items
     if not config.getoption("promptdrift", default=None):
         return
@@ -225,7 +229,7 @@ def pytest_collection_modifyitems(session, config, items):
 
 
 @pytest.fixture
-def promptdrift_report(request) -> Optional[DiffReport]:
+def promptdrift_report(request: pytest.FixtureRequest) -> Optional[DiffReport]:
     """``DiffReport`` for the first ``--promptdrift`` file, or ``None`` without the option."""
     reports = build_reports(request.config)
     return reports[0][1] if reports else None

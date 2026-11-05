@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+from typing import TYPE_CHECKING, Any, Optional, Union
+
+if TYPE_CHECKING:  # pragma: no cover - annotations only
+    from .providers import SupportsComplete
 
 __all__ = ["JUDGE_SYSTEM", "DEFAULT_JUDGE_MODELS", "build_judge_prompt", "parse_verdict",
            "judge_pair", "judge_both_orders", "default_judge_provider", "resolve_judge"]
@@ -63,7 +67,8 @@ def parse_verdict(text: str) -> tuple[str, str] | None:
     return verdict, str(data.get("reasoning", ""))
 
 
-def _ask(provider, inp, out_a, out_b, expected, max_tokens) -> tuple[str, str] | None:
+def _ask(provider: SupportsComplete, inp: str, out_a: str, out_b: str,
+         expected: str | None, max_tokens: int) -> tuple[str, str] | None:
     try:
         r = provider.complete(JUDGE_SYSTEM, build_judge_prompt(inp, out_a, out_b, expected),
                               max_tokens=max_tokens)
@@ -72,7 +77,7 @@ def _ask(provider, inp, out_a, out_b, expected, max_tokens) -> tuple[str, str] |
     return parse_verdict(r.text)
 
 
-def judge_pair(provider, inp: str, out_a: str, out_b: str,
+def judge_pair(provider: SupportsComplete, inp: str, out_a: str, out_b: str,
                expected: str | None = None, max_tokens: int = 150) -> tuple[str, str]:
     """Ask ``provider`` to compare A against B once, in that order.
 
@@ -82,8 +87,8 @@ def judge_pair(provider, inp: str, out_a: str, out_b: str,
     return _ask(provider, inp, out_a, out_b, expected, max_tokens) or ("neutral", "")
 
 
-def judge_both_orders(provider, inp: str, out_a: str, out_b: str,
-                      expected: str | None = None, max_tokens: int = 150) -> dict:
+def judge_both_orders(provider: SupportsComplete, inp: str, out_a: str, out_b: str,
+                      expected: str | None = None, max_tokens: int = 150) -> dict[str, Any]:
     """Judge A vs B, then B vs A, to expose position bias.
 
     The second verdict is flipped back into A-vs-B terms. If the two agree the
@@ -98,7 +103,7 @@ def judge_both_orders(provider, inp: str, out_a: str, out_b: str,
     ba = _ask(provider, inp, out_b, out_a, expected, max_tokens)
     v_ab = ab[0] if ab else None
     v_ba = FLIP[ba[0]] if ba else None
-    if v_ab is None or v_ba is None:
+    if ab is None or ba is None:
         return {"verdict": "error", "reasoning": "judge call failed or returned unusable text",
                 "verdict_ab": v_ab, "verdict_ba": v_ba, "consistent": None}
     if v_ab == v_ba:
@@ -122,8 +127,9 @@ def default_judge_provider() -> str | None:
     return None
 
 
-def resolve_judge(judge_provider=None, judge_model: str | None = None,
-                  verbose: bool = False):
+def resolve_judge(judge_provider: Union[str, SupportsComplete, None] = None,
+                  judge_model: str | None = None,
+                  verbose: bool = False) -> Optional[SupportsComplete]:
     """Build the judge, or return ``None`` if none is available.
 
     ``judge_provider`` may be a provider object (anything with ``complete``),

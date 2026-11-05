@@ -56,7 +56,8 @@ def _trunc(s: str, n: int = 72) -> str:
     return s[:n-3] + "..." if len(s) > n else s
 
 
-def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool = False):
+def print_report(report: DiffReport, show_cases: bool = True,
+                 show_outputs: bool = False) -> None:
     W = 72
     print()
     print(f"{BOLD}{ORG}{'━' * W}{R}")
@@ -78,7 +79,7 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     print(f"  {'─' * (W-2)}")
     ci = report.confidence_intervals() or {}
 
-    def ci_s(key):
+    def ci_s(key: str) -> str:
         if key not in ci:
             return ""
         lo, hi = ci[key]
@@ -176,7 +177,7 @@ def print_report(report: DiffReport, show_cases: bool = True, show_outputs: bool
     _footer(W)
 
 
-def _print_structural(report: DiffReport):
+def _print_structural(report: DiffReport) -> None:
     if not any(c.signature_a is not None for c in report.cases):
         return
     st = report.structural_summary()
@@ -190,7 +191,7 @@ def _print_structural(report: DiffReport):
     print()
 
 
-def _print_checks(report: DiffReport):
+def _print_checks(report: DiffReport) -> None:
     cs = report.checks_summary()
     if cs is None:
         return
@@ -202,11 +203,11 @@ def _print_checks(report: DiffReport):
     print()
 
 
-def _print_stability(report: DiffReport):
+def _print_stability(report: DiffReport) -> None:
     st = report.stability_summary()
     if st is None:
         return
-    def pct(v):
+    def pct(v: float | None) -> str:
         return "n/a" if v is None else f"{round(v * 100, 1)}%"
     ec = YLW if (st["avg_excess_drift"] or 0) > 0.05 else DIM
     print(f"  {BOLD}Stability{R}  n={st['samples_per_side']}/side   "
@@ -217,7 +218,7 @@ def _print_stability(report: DiffReport):
     print()
 
 
-def _print_judge(report: DiffReport):
+def _print_judge(report: DiffReport) -> None:
     js = report.judge_summary()
     if js is None:
         return
@@ -230,15 +231,15 @@ def _print_judge(report: DiffReport):
     print()
 
 
-def _footer(w: int):
+def _footer(w: int) -> None:
     print(f"{BOLD}{ORG}{'━' * w}{R}\n")
 
 
-def print_json(report: DiffReport):
+def print_json(report: DiffReport) -> None:
     print(report.to_json())
 
 
-def save_report(report: DiffReport, path: str):
+def save_report(report: DiffReport, path: str) -> None:
     with open(path, "w") as f:
         f.write(report.to_json())
     print(f"  {GRN}✓{R} Report saved → {BOLD}{path}{R}")
