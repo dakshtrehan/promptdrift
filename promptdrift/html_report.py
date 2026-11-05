@@ -57,20 +57,24 @@ def _tokens(text: str) -> tuple[list[str], list[str]]:
 
 
 def _render_side(words, gaps, marks, tag: str) -> str:
-    """Join words back with their own whitespace, wrapping marked runs in ``tag``."""
+    """Join words back with their own whitespace, wrapping marked runs in ``tag``.
+
+    A run of consecutive marked words shares one tag; the whitespace after the
+    last marked word stays outside it so the highlight hugs the words.
+    """
     out = []
     open_run = False
-    for word, gap, marked in zip(words, gaps, marks):
+    n = len(words)
+    for i, (word, gap, marked) in enumerate(zip(words, gaps, marks)):
+        marked = marked and word != ""
         if marked and not open_run:
             out.append(f"<{tag}>")
             open_run = True
-        elif not marked and open_run:
+        out.append(_e(word))
+        if open_run and not (i + 1 < n and marks[i + 1] and words[i + 1] != ""):
             out.append(f"</{tag}>")
             open_run = False
-        out.append(_e(word))
         out.append(_e(gap))
-    if open_run:
-        out.append(f"</{tag}>")
     return "".join(out)
 
 
