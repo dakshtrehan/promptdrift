@@ -36,6 +36,19 @@ Not yet published to PyPI. See RELEASE.md for the release checklist.
 ### Fixed
 - `compare()` with config dicts that omit `system`, `temperature` or `max_tokens` raised `KeyError`; the same defaults as `load_config()` now apply.
 - Drift scores of identical texts could be reported as `-0.0` because of floating point rounding; drift and within-version drift are now clamped at `0.0`.
+- JUnit XML is always well-formed: characters XML 1.0 forbids (NUL, the ESC of ANSI colour codes, other C0 controls, lone surrogates) are written as visible escapes such as `\x1b`.
+- A lone UTF-16 surrogate in an output (an emoji cut in half upstream) no longer crashes `--html`, `--junit`, `save_csv(include_outputs=True)` or the Markdown step summary; it is shown as U+FFFD.
+- CSV export: text cells that start with `=`, `+`, `-`, `@`, a tab or a carriage return get a leading `'` so spreadsheets do not run them as formulas; `to_csv(..., escape_formulas=False)` keeps the raw text.
+- `render_markdown` no longer adds HTML entities or backslashes inside code spans, so JSON braces, `<`, `&` and snake_case version names show as written in PR comments, and a backtick in a version name cannot break the header line. Hostile outputs still cannot close the details block or split a table row.
+- Threshold gates compare the average drift at the 4 decimals stored in `report.json`, so the CLI exit code and the Action's PR comment always agree; a failure sentence adds decimals instead of printing the same number twice.
+- `--max-drift`, `--promptdrift-max-drift` and `evaluate_thresholds(max_drift=...)` reject values outside 0.0 to 1.0 (a percent such as `10`, negatives, NaN, infinity), which could never fail before.
+- `promptdrift watch` keeps running when a run raises: a half-saved YAML checks file is a one line input error and any other error is shown as a `watch error:` line. `diff` no longer prints a traceback for unexpected errors (use `--verbose`).
+- The HTML report stays fast on long outputs (above about 500 by 500 words the diff is made line by line first, with a note) and on many cases (debounced, cached text filter). The tag filter no longer matches `a` against a tag `a|b`, and empty tags are not shown.
+- `tags` in outputs files and case files must be a string or a list of strings or numbers; other values (numbers, booleans, mappings, nested lists) are rejected with a message naming the record instead of a traceback or invented tags. None and empty entries in a list are skipped.
+- With `--json`, the "saved" lines of `-o`, `--html`, `--csv` and `--junit` go to stderr, so stdout stays one JSON document.
+- Running with stdout closed (`promptdrift ... >&-`) exits with the command's own code again instead of 1 with a traceback.
+- `pytest --promptdrift` counts the generated items in `collected N items`, `--collect-only` and the `-k`/`-m` selection line.
+- A blank `ANTHROPIC_API_KEY` is passed to the Anthropic SDK as unset, so it fails before sending a request when no credentials are configured.
 
 ## [0.2.0] - 2026-11-04
 
