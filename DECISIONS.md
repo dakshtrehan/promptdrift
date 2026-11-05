@@ -546,3 +546,68 @@ So that parallel work fits together, these names were fixed in advance:
   venvs in the scratchpad, package installed with `--no-deps`); `pytest --help`
   lists the six options through the entry point; the whole suite runs no
   model call and the two new test files take under two seconds.
+
+## D-D. Workstream D: documentation site
+
+* The site lives under `docs/` and is built by `mkdocs.yml` with
+  mkdocs-material and mkdocstrings[python]. `font: false`, no analytics and
+  no social cards, so neither the build nor the pages fetch anything from the
+  network; the only external URLs in the built HTML are the repository links
+  and the FontAwesome licence comment inside the inlined icons.
+* Every number and output shown in the pages was produced by running the
+  command with the keys blanked, then pasted with ANSI codes stripped. The
+  report header line that carries the version string is trimmed from pasted
+  outputs so a version bump does not make the pages stale; the JUnit excerpt
+  on the formats page shows 0.3.0 because the bump had landed by then.
+* `docs/reference/cli.md` is generated from the real `--help` output of every
+  subcommand by a throwaway script (kept in the scratchpad, not the repo), and
+  `tests/test_docs.py` asserts that every flag `compare --help` and
+  `diff --help` print appears on the page, so the reference cannot fall
+  behind the parser without a test failing.
+* `docs/reference/api.md` uses one `:::` block per module. `promptdrift.compare`
+  is both a submodule and a re-exported function, so that section lists the
+  functions explicitly (`promptdrift.compare.compare`, `load_config`,
+  `load_cases`, `render_prompt`) rather than relying on griffe to pick the
+  module over the function. `docstring_style: null` renders the docstrings as
+  plain text (the code base does not use Google or numpy sections
+  consistently), `show_source: false`, `members_order: source`, and
+  `show_if_no_docstring: true` so that `CaseResult`, `get_provider` and the
+  module constants appear even without a docstring; `filters: ["!^_"]` hides
+  private names. mkdocstrings reads the modules statically, so the build
+  does not need pytest installed for `promptdrift.pytest_plugin`.
+* `changelog.md` and `contributing.md` include `CHANGELOG.md` and
+  `CONTRIBUTING.md` through `pymdownx.snippets` (`base_path` is the repo root
+  and `docs/`, `check_paths: true`) instead of copying them, so the site and
+  the repository files cannot drift apart.
+* The pytest plugin is described as "auto-loaded" and the shim module is not
+  named, as workstream C asked.
+* `tests/test_docs.py` runs every fenced bash block that starts with
+  `# docs-test: run` from a temporary directory that mirrors the repository
+  root through symlinks (`examples`, `benchmark`, `promptdrift`,
+  `pyproject.toml`), so the relative paths in the docs resolve and the report
+  files those commands write never land in the repository. Only offline
+  commands are marked; the test refuses `--judge` and live `compare` in a
+  marked block. The dash check in the test spells the two characters as
+  `chr(0x2014)` and `chr(0x2013)` so the test file passes the rule it
+  enforces.
+* `.github/workflows/docs.yml` builds with `--strict` on every pull request
+  as a check and deploys with `actions/configure-pages`,
+  `actions/upload-pages-artifact` and `actions/deploy-pages` only on a push to
+  `main`, with `pages: write` and `id-token: write` on the deploy job alone.
+  The dash check in the workflow greps for the UTF-8 byte sequences under
+  `LC_ALL=C` because `grep -P "\x{2014}"` fails outside a UTF-8 locale. Pages
+  must be enabled once in the repository settings with "GitHub Actions" as
+  the source; the workflow has not run on a real runner yet.
+* `docs/requirements.txt` pins the toolchain to major versions
+  (`mkdocs>=1.6,<2`, `mkdocs-material>=9.5,<10`, `mkdocstrings[python]>=0.26,<1`,
+  `pymdown-extensions>=10,<11`). `pyproject.toml` was not touched; hardening
+  may add a `docs` extra pointing at the same list. Verified locally with
+  mkdocs 1.6.1, mkdocs-material 9.7.7, mkdocstrings 0.30.1 and
+  mkdocstrings-python 2.0.9: `mkdocs build --strict` passes with zero
+  warnings. mkdocs-material prints a banner about MkDocs 2.0 on every build;
+  it is informational and does not affect strict mode.
+* Not done, not my files: `site/` (the default `mkdocs build` output
+  directory) is not in `.gitignore`; the docs build in this session wrote to
+  the scratchpad instead. README.md was being rewritten by hardening while
+  the docs were written, so the README links to the site are left to that
+  workstream (the URLs are listed in the structured result).
