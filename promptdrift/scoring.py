@@ -181,11 +181,34 @@ def score_case(
     )
 
 
+def _valid_tags(raw: object) -> bool:
+    """True when ``raw`` is a usable ``tags`` value: None, a string, or a list of scalars.
+
+    List elements may be strings or numbers (numbers become strings); booleans,
+    None and nested containers are rejected. Shared by the case and outputs
+    loaders so both input paths accept the same files.
+    """
+    if raw is None or isinstance(raw, str):
+        return True
+    if not isinstance(raw, (list, tuple)):
+        return False
+    return all(isinstance(t, (str, int, float)) and not isinstance(t, bool) for t in raw)
+
+
 def _case_tags(case: dict[str, Any]) -> list[str] | None:
-    """Normalise ``case["tags"]`` to a list of strings, or None when absent."""
+    """Normalise ``case["tags"]`` to a list of strings, or None when absent.
+
+    A string is one tag. In a list, None and empty or whitespace-only entries
+    are skipped; when nothing is left the result is None ("no tags"). Any
+    other type (a number, a bool, a dict) raises ``ValueError``.
+    """
     raw = case.get("tags")
     if raw is None:
         return None
     if isinstance(raw, str):
         raw = [raw]
-    return [str(t) for t in raw]
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError(f"Case {case.get('id', '?')}: 'tags' must be a string or a list "
+                         f"of strings, got {type(raw).__name__}.")
+    tags = [str(t) for t in raw if t is not None and str(t).strip()]
+    return tags or None

@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Union
 
 from .core import DiffReport
 from .judge import resolve_judge
-from .scoring import score_case
+from .scoring import _valid_tags, score_case
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only
     from .providers import SupportsComplete, SupportsEmbed
@@ -50,6 +50,9 @@ def _normalise(rec: object, i: int) -> dict[str, Any]:
                              "or a non-empty list of strings (samples).")
         if isinstance(val, list):
             rec[side] = [v or "" for v in val]
+    if not _valid_tags(rec.get("tags")):
+        raise ValueError(f"Record {i + 1} ({rec['case_id']}): 'tags' must be a string "
+                         "or a list of strings.")
     rec["case_id"] = str(rec["case_id"])
     return rec
 

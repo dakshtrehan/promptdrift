@@ -12,7 +12,7 @@ import yaml
 from .core import DiffReport
 from .judge import judge_pair, resolve_judge
 from .providers import BaseProvider, SupportsComplete, get_provider
-from .scoring import score_case
+from .scoring import _valid_tags, score_case
 from .similarity import text_similarity, tfidf_similarity
 
 
@@ -79,7 +79,7 @@ def load_cases(path: str | Path) -> list[dict[str, Any]]:
             raise ValueError(f"Case {i}: missing 'input' field.")
         if "id" not in c:
             c["id"] = f"case_{i+1}"
-        if "tags" in c and c["tags"] is not None and not isinstance(c["tags"], (list, str)):
+        if "tags" in c and not _valid_tags(c["tags"]):
             raise ValueError(f"Case {i}: 'tags' must be a list of strings.")
     return cases
 
