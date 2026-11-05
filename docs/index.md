@@ -93,14 +93,15 @@ The only required dependency is PyYAML. Everything else is an optional extra:
 | `anthropic` | `anthropic>=0.20` | Anthropic generation and judge |
 | `all` | both SDKs | |
 | `watch` | `watchdog>=3.0` | Faster wake-ups in [watch mode](recipes/watch.md) (polling works without it) |
-| `dev` | pytest, pytest-cov, ruff, build, twine, both SDKs | Contributing |
+| `docs` | mkdocs, mkdocs-material, mkdocstrings, pymdown-extensions | Building this site (mirrors `docs/requirements.txt`) |
+| `dev` | pytest, pytest-cov, ruff, mypy, types-PyYAML, build, twine, markdown-it-py, both SDKs | Contributing |
 
 ```bash
 pip install -e ".[openai]"
 pip install -e ".[all,watch]"
 ```
 
-Ollama needs no extra, only a local server at `http://localhost:11434`.
+Ollama needs no SDK extra, but it uses `requests` (not a promptdrift dependency; most environments already have it) and a local server at `http://localhost:11434`.
 
 Python 3.9 to 3.13 are supported and tested in CI.
 

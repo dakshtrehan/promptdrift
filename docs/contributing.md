@@ -12,7 +12,7 @@ first.
 
 ```bash
 pip install -e .
-pip install -r docs/requirements.txt
+pip install -r docs/requirements.txt   # or: pip install -e ".[docs]"
 mkdocs build --strict        # fails on any warning, including a broken link
 mkdocs serve                 # live preview at http://127.0.0.1:8000/
 ```
@@ -27,4 +27,4 @@ docs and it needs no API key.
 
 The deploy workflow (`.github/workflows/docs.yml`) builds with `--strict` on
 every pull request and publishes to this repository's GitHub Pages on a push
-to `main`.
+to `main` (or a manual `workflow_dispatch` run on `main`).

@@ -178,8 +178,14 @@ def test_mock_provider_never_builds_a_real_provider(monkeypatch):
                  "temperature": 0.0, "max_tokens": 1}, {"version": "b", "provider": "openai",
                  "model": "m", "prompt_template": "{input}", "temperature": 0.0, "max_tokens": 1},
                 cases=[{"id": "x", "input": "y"}], use_judge=False, verbose=False)
-    # the example patches get_provider itself, so it runs even with the real one broken
+    # the example patches get_provider itself, so it runs even with the real one broken.
+    # main() blanks the API keys in os.environ; route that through monkeypatch so the
+    # blank keys do not leak into later tests (monkeypatch restores them at teardown).
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    before = (os.environ.get("OPENAI_API_KEY"), os.environ.get("ANTHROPIC_API_KEY"))
     assert mod.main() == 0
+    assert (os.environ.get("OPENAI_API_KEY"), os.environ.get("ANTHROPIC_API_KEY")) == before
 
 
 def test_ci_pytest_example(tmp_path):

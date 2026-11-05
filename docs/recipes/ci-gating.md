@@ -26,7 +26,7 @@ jobs:
   drift:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dakshtrehan/promptdrift@main
         with:
           outputs: prompts/outputs.jsonl
@@ -65,8 +65,10 @@ threshold input disables that gate; `fail-on-regression` defaults to
 3. Posts or updates **one** comment on the pull request. The comment carries
    a hidden marker (`comment-marker`, default `<!-- promptdrift-report -->`)
    so a re-run edits the same comment instead of adding another; the body is
-   identical for identical reports. Change the marker to get separate
-   comments from two jobs.
+   identical for identical reports. To run the action from two jobs or a
+   matrix, give each job its own `comment-marker` (for separate comments)
+   **and** its own `artifact-name`: artifact names must be unique within a
+   workflow run, and a second upload under the same name fails the job.
 4. Writes the same Markdown to the job summary.
 5. Uploads the report directory as an artifact (`artifact-name`, default
    `promptdrift-report`), with `threshold-failures.txt` added on a breach.
@@ -141,8 +143,9 @@ Jenkins, GitHub reporters and GitLab accept.
 ## Without the action
 
 A plain workflow needs nothing but the CLI. `examples/ci/promptdrift.yml`
-in the repository is a complete sample (it is not registered under
-`.github/workflows/` there):
+in the repository is a complete minimal sample (it is not registered under
+`.github/workflows/` there); the steps below extend it with a JUnit file and
+drift gates, and upload both report files:
 
 ```yaml
       - name: Install promptdrift
@@ -162,10 +165,12 @@ in the repository is a complete sample (it is not registered under
 
       - name: Keep the report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: promptdrift-report
-          path: promptdrift-*.json
+          path: |
+            promptdrift-report.json
+            promptdrift-junit.xml
 ```
 
 Blanking the keys in the step environment is a cheap guarantee that an

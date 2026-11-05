@@ -106,8 +106,8 @@ def main() -> int:
 
     # The scripted provider picks its answers from ``model``, so point each
     # config's model at a version name instead of a real model id.
-    # (Config dicts get no defaults filled in, unlike YAML files loaded with
-    # load_config, so temperature and max_tokens are given explicitly.)
+    # (Config dicts get the same defaults as load_config since 0.3.0; the
+    # explicit temperature and max_tokens below just make the run obvious.)
     cfg_a = {"version": "v1", "provider": "openai", "model": "v1",
              "system": "You are a concise assistant.", "prompt_template": "{input}",
              "temperature": 0.0, "max_tokens": 256}

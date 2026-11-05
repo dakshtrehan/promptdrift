@@ -68,7 +68,8 @@ The only required dependency is PyYAML. Extras:
 | `[anthropic]` | `anthropic` | live mode or the judge with Claude |
 | `[all]` | both SDKs | |
 | `[watch]` | `watchdog` | faster wake-ups in `promptdrift watch` (optional, polling works without it) |
-| `[dev]` | pytest, ruff, mypy, build, twine | contributing |
+| `[docs]` | mkdocs, mkdocs-material, mkdocstrings, pymdown-extensions | building the docs site (mirrors `docs/requirements.txt`) |
+| `[dev]` | pytest, pytest-cov, ruff, mypy, types-PyYAML, build, twine, markdown-it-py, both SDKs | contributing |
 
 Ollama (local models) needs `requests`, which most environments already have.
 
@@ -220,7 +221,7 @@ jobs:
   drift:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dakshtrehan/promptdrift@main   # or @v0.3.0 once tagged
         with:
           outputs: prompts/outputs.jsonl
@@ -300,7 +301,7 @@ So TF-IDF separates paraphrases from non-paraphrases better than chance but far 
 * TF-IDF similarity is lexical: it calls a faithful paraphrase "drift" and can miss a meaning flip that keeps the same words. Use checks for facts that must hold and the judge or embeddings for meaning.
 * An LLM judge is a model with its own biases. Running both orders exposes position bias; it does not remove other biases. Inconsistent cases are excluded from the regression count rather than guessed.
 * Bootstrap intervals assume cases are independent and representative; they say nothing about cases you did not include, and the percentile bootstrap is a little too narrow for very small samples.
-* The GitHub Action has been exercised against a mocked runner and a fake GitHub API in this repository's tests; the dogfood workflow is its first run on a real runner.
+* The GitHub Action is tested against a mocked runner and a fake GitHub API, and dogfooded on this repository's own pull requests (where it posts its comment and uploads its report); it has not yet been run from another repository via `uses: dakshtrehan/promptdrift@<ref>`.
 * Offline mode with no judge makes no network calls at all. Live mode and `--judge` call the provider and cost money.
 
 ## Backward compatibility

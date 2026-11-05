@@ -14,6 +14,7 @@ No network and no model call is involved; only offline commands are marked.
 """
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 import shlex
@@ -132,6 +133,80 @@ def test_docs_requirements_and_workflow_exist():
     deploy = wf["jobs"]["deploy"]
     assert deploy["permissions"] == {"pages": "write", "id-token": "write"}
     assert "refs/heads/main" in deploy["if"]
+    # a manual run on main can deploy (Pages enabled after the first push)
+    assert "workflow_dispatch" in triggers
+    assert "github.event_name != 'pull_request'" in deploy["if"]
+    upload = next(s for s in wf["jobs"]["build"]["steps"]
+                  if "upload-pages-artifact" in s.get("uses", ""))
+    assert upload["if"] == deploy["if"]
+    # configure-pages fails the build job while Pages is disabled and is not needed
+    assert "configure-pages" not in str(wf["jobs"])
+
+
+def _optional_dependencies() -> dict[str, list[str]]:
+    """Extras from pyproject.toml without tomllib (absent on Python 3.9 and 3.10)."""
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    section = text.split("[project.optional-dependencies]", 1)[1].split("\n[", 1)[0]
+    extras: dict[str, list[str]] = {}
+    for m in re.finditer(r"^(\w+)\s*=\s*\[(.*?)\]\s*$", section, re.MULTILINE | re.DOTALL):
+        names = re.findall(r'"([A-Za-z0-9_.-]+)', m.group(2))
+        extras[m.group(1)] = names
+    return extras
+
+
+@pytest.mark.parametrize("page,prefix", [("README.md", "`[{}]`"), ("docs/index.md", "`{}`")])
+def test_extras_tables_match_pyproject(page, prefix):
+    extras = _optional_dependencies()
+    assert {"openai", "anthropic", "watch", "docs", "all", "dev"} <= set(extras)
+    rows = {line.split("|")[1].strip(): line for line in
+            (ROOT / page).read_text(encoding="utf-8").splitlines()
+            if line.startswith("| `")}
+    sdk = {"openai", "anthropic"}
+    for extra in ("docs", "dev"):
+        row = rows.get(prefix.format(extra))
+        assert row, f"{page}: no row for the {extra} extra"
+        for name in extras[extra]:
+            if name in sdk:
+                assert "both SDKs" in row, f"{page}: {extra} row omits the SDKs"
+            else:
+                assert name in row, f"{page}: {extra} row omits {name}"
+
+
+def test_quickstart_init_output_matches_the_cli(tmp_path):
+    proc = subprocess.run([sys.executable, "-m", "promptdrift.cli", "init", "--dir", "./prompts"],
+                          cwd=str(tmp_path), env=_blank_env(), capture_output=True,
+                          text=True, encoding="utf-8", timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    text = (DOCS / "quickstart.md").read_text(encoding="utf-8")
+    for line in proc.stdout.splitlines():
+        if line.strip():
+            assert line.rstrip() in text, f"quickstart does not show {line!r}"
+
+
+def test_formats_page_matches_compare_dict_defaults():
+    text = (DOCS / "reference" / "formats.md").read_text(encoding="utf-8")
+    assert "must set `temperature` and `max_tokens` explicitly" not in text
+    assert "same defaults as `load_config()`" in text
+
+
+def test_ci_gating_plain_workflow_uploads_the_junit_file():
+    text = (DOCS / "recipes" / "ci-gating.md").read_text(encoding="utf-8")
+    block = text.split("## Without the action", 1)[1].split("```yaml", 1)[1].split("```", 1)[0]
+    wf = yaml.safe_load(block)
+    run = next(s for s in wf if "promptdrift diff" in s.get("run", ""))
+    upload = next(s for s in wf if "upload-artifact" in s.get("uses", ""))
+    written = re.findall(r"--(?:output|junit) (\S+)", run["run"])
+    assert len(written) == 2
+    patterns = upload["with"]["path"].split()
+    for name in written:
+        assert any(fnmatch.fnmatch(name, pat) for pat in patterns), name
+
+
+@pytest.mark.parametrize("page", ["action/README.md", "docs/reference/action.md",
+                                  "docs/recipes/ci-gating.md"])
+def test_action_docs_say_artifact_names_must_be_unique(page):
+    text = " ".join((ROOT / page).read_text(encoding="utf-8").split())
+    assert "unique within a workflow run" in text
 
 
 # ── house style ──────────────────────────────────────────────────────────────

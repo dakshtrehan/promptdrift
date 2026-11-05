@@ -32,9 +32,9 @@ provider_options: {}         # optional extra keyword arguments for the provider
 | `provider_options` | no | a mapping forwarded to the provider constructor, for example `base_url` for Ollama or `temperature_supported: true|false` to override Anthropic sampling detection |
 
 !!! note "Dicts passed to `compare()`"
-    `compare()` accepts config dicts as well as paths. Only `load_config()`
-    fills in the defaults for `system`, `temperature` and `max_tokens`, so a
-    dict must set `temperature` and `max_tokens` explicitly.
+    `compare()` accepts config dicts as well as paths. Since 0.3.0 a dict
+    gets the same defaults as `load_config()` for `system`, `temperature` and
+    `max_tokens`, so those keys can be left out.
 
 ## Test cases (live mode)
 

@@ -107,14 +107,14 @@ promptdrift init --dir ./prompts
 ```
 
 ```text
-  ✓ Created in /home/you/project/prompts/
+  ✓ Created in prompts/
     v1.yaml      baseline prompt config
     v2.yaml      new prompt config
     golden.json  test cases
 
   Next:
     export OPENAI_API_KEY=sk-...
-    promptdrift compare /home/you/project/prompts/v1.yaml /home/you/project/prompts/v2.yaml --cases /home/you/project/prompts/golden.json
+    promptdrift compare prompts/v1.yaml prompts/v2.yaml --cases prompts/golden.json
 ```
 
 A config is a flat YAML (or JSON) file:
@@ -237,7 +237,7 @@ jobs:
   drift:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dakshtrehan/promptdrift@main
         with:
           outputs: prompts/outputs.jsonl
