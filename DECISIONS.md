@@ -324,3 +324,47 @@ So that parallel work fits together, these names were fixed in advance:
 * Docs site under `docs/` built by `mkdocs.yml` with mkdocs-material and
   mkdocstrings, deployed by `.github/workflows/docs.yml` to this repo's Pages.
 * Version becomes 0.3.0 in `promptdrift/version.py` during hardening.
+
+## D14. HTML report, CSV and JUnit export (workstream B)
+
+* `promptdrift.html_report` builds the page from Python strings with
+  `html.escape` on every value; no templating library and no embedded JSON, so
+  the page does not depend on JavaScript. Word diffs use
+  `difflib.SequenceMatcher` on whitespace-split words; each side keeps its own
+  whitespace, and highlight runs hug the words (trailing gaps stay outside
+  `<del>`/`<ins>`), so newlines and RTL text render as written.
+* Each case is its own `<tbody>` carrying `data-*` attributes (drift, level
+  rank, verdict, flip, tags as `|a|b|`, regression flag, original index). Sorting
+  reorders tbodies and filtering hides them, which keeps the summary row and
+  the detail row together. With JavaScript off, every detail row is visible and
+  the controls are hidden (`.js` class is added by an inline head script).
+* Theme: CSS variables on `:root`, dark values under `prefers-color-scheme` guarded
+  by `:root:not([data-theme=light])` and again under `:root[data-theme=dark]`;
+  the toggle writes `promptdrift-theme` to `localStorage` inside try/except.
+* The verdict rule moved into `reporter.verdict_for(report) -> (status, reason)`
+  with `VERDICT_LABEL`; `print_report` output is byte-for-byte unchanged, and the
+  HTML and JUnit outputs reuse it so the three never disagree.
+* `CaseResult.tags` is appended last with default `None`. A bare string tag is
+  normalised to a one-item list in `scoring._case_tags`; `load_cases` rejects
+  non-list, non-string tags early.
+* CSV: `\r\n` line endings per RFC 4180, booleans as `true`/`false`, None as
+  empty, tags joined with `;`. Outputs are opt-in via `include_outputs=True`
+  because they can be large and multi-line; `expected` is not a column since
+  `CaseResult` does not store it.
+* JUnit: `<testsuites>` wrapping one `<testsuite name="promptdrift">`, because
+  Jenkins, GitHub test reporters and GitLab all accept the wrapper and some
+  require it. `classname` is the first tag when present, otherwise
+  `"<version_a> vs <version_b>"`. A judge `error` on a non-regressed case is an
+  `<error>` rather than a failure so CI counts it separately. `time` is the sum
+  of the stored latencies (0 in offline mode).
+* CLI: `--html`, `--csv`, `--junit` live in `_add_output_args` so compare and
+  diff share them; `_emit_exports` uses `getattr` so older Namespace objects
+  without the attributes keep working.
+* Screenshots were taken with Playwright driving the system Chrome
+  (`executable_path=/usr/bin/google-chrome`) because the Playwright browser
+  download is blocked in this environment; the demo report is built in Python
+  from `examples/outputs.jsonl` plus tags and three edge cases (RTL plus emoji,
+  empty outputs, a `<script>` payload) without touching `examples/`.
+* Not done: a screenshot test in CI (would need a browser in the matrix) and an
+  `expected` column or field, which would widen `CaseResult` beyond the agreed
+  contract.
