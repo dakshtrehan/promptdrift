@@ -2,16 +2,17 @@
 Main compare engine. Runs prompt versions, embeds outputs, scores drift.
 """
 from __future__ import annotations
+
 import json
-import math
-import re
-from collections import Counter
 from pathlib import Path
 
 import yaml
 
-from .core import CaseResult, DiffReport, cosine_similarity, classify_drift
+from .core import DiffReport
+from .judge import judge_pair, resolve_judge
 from .providers import BaseProvider, get_provider
+from .scoring import score_case
+from .similarity import text_similarity, tfidf_similarity
 
 
 # ── Config / case loaders ─────────────────────────────────────────────────────
@@ -20,7 +21,9 @@ def load_config(path: str | Path) -> dict:
     Load a prompt config (YAML or JSON).
 
     Required fields: version, model, provider, prompt_template
-    Optional: system, temperature, max_tokens, embedding_model
+    Optional: system, temperature, max_tokens, embedding_model, provider_options
+    (extra keyword arguments for the provider, for example
+    ``{"temperature_supported": false}`` or ``{"base_url": "..."}`` for Ollama)
 
     Example:
         version: v2
@@ -76,75 +79,32 @@ def load_cases(path: str | Path) -> list[dict]:
     return cases
 
 
-# ── TF-IDF fallback (offline, zero-cost similarity) ───────────────────────────
+# ── Backward-compatible aliases (v0.1.1 private names) ───────────────────────
+# Kept so code written against v0.1.1 keeps working. New code should use
+# promptdrift.similarity.tfidf_similarity and promptdrift.judge.judge_pair.
 def _tfidf_similarity(text_a: str, text_b: str) -> float:
-    """Tiny TF-IDF cosine similarity. Used when no embedding provider is available."""
-    tok_a = re.findall(r"\b\w+\b", text_a.lower())
-    tok_b = re.findall(r"\b\w+\b", text_b.lower())
-    vocab = sorted(set(tok_a) | set(tok_b))
-    if not vocab:
-        return 1.0
-    idx = {w: i for i, w in enumerate(vocab)}
-    vec_a = [0.0] * len(vocab)
-    vec_b = [0.0] * len(vocab)
-    ca, cb = Counter(tok_a), Counter(tok_b)
-    ta = sum(ca.values()) or 1
-    tb = sum(cb.values()) or 1
-    for w, i in idx.items():
-        vec_a[i] = ca.get(w, 0) / ta
-        vec_b[i] = cb.get(w, 0) / tb
-    return cosine_similarity(vec_a, vec_b)
+    return tfidf_similarity(text_a, text_b)
 
 
 def _embed_pair(emb_prov: BaseProvider | None, text_a: str, text_b: str) -> float:
-    """Return cosine similarity between two texts. Falls back to TF-IDF on failure."""
-    if emb_prov is not None:
-        try:
-            ea = emb_prov.embed(text_a).vector
-            eb = emb_prov.embed(text_b).vector
-            return cosine_similarity(ea, eb)
-        except Exception:
-            pass
-    return _tfidf_similarity(text_a, text_b)
+    return text_similarity(text_a, text_b, emb_prov)[0]
 
 
-# ── LLM judge ─────────────────────────────────────────────────────────────────
 def _judge(provider: BaseProvider, inp: str, out_a: str, out_b: str,
            expected: str | None = None) -> tuple[str, str]:
+    return judge_pair(provider, inp, out_a, out_b, expected=expected)
+
+
+def render_prompt(template: str, inp: str) -> str:
+    """Fill ``{input}`` in a prompt template.
+
+    Uses ``str.format`` like v0.1.1, and falls back to plain replacement when the
+    template contains other literal braces (for example a JSON example).
     """
-    Ask an LLM to compare A vs B and return (verdict, reasoning).
-    verdict is one of: improved | regressed | neutral
-    """
-    exp_line = f"\nExpected answer: {expected}" if expected else ""
-    prompt = f"""Compare two AI outputs for the same input.{exp_line}
-
-Input: {inp}
-
-Output A (baseline): {out_a}
-
-Output B (new version): {out_b}
-
-Is Output B improved, regressed, or neutral compared to A?
-- improved: clearly more accurate, helpful, or complete
-- regressed: less accurate, introduces errors, or loses important information
-- neutral: equivalent quality, just phrased differently
-
-Respond ONLY with this JSON (no markdown, no extra text):
-{{"verdict": "improved|regressed|neutral", "reasoning": "one sentence"}}"""
-
     try:
-        r = provider.complete(
-            "You evaluate AI output quality. Return only valid JSON.",
-            prompt, max_tokens=150,
-        )
-        text = r.text.strip()
-        start, end = text.find("{"), text.rfind("}") + 1
-        if start >= 0 and end > start:
-            data = json.loads(text[start:end])
-            return data.get("verdict", "neutral"), data.get("reasoning", "")
-    except Exception:
-        pass
-    return "neutral", ""
+        return template.format(input=inp)
+    except (KeyError, IndexError, ValueError):
+        return template.replace("{input}", inp)
 
 
 # ── Embedding provider resolution ─────────────────────────────────────────────
@@ -168,6 +128,11 @@ def _resolve_embedder(cfg: dict) -> BaseProvider | None:
         return None
 
 
+def cfg_embedding_requested(*configs) -> bool:
+    """True if any already-loaded config dict sets ``embedding_model``."""
+    return any(isinstance(c, dict) and c.get("embedding_model") for c in configs)
+
+
 # ── Main compare function ─────────────────────────────────────────────────────
 def compare(
     config_a: str | Path | dict,
@@ -175,44 +140,68 @@ def compare(
     cases: str | Path | list[dict],
     *,
     use_judge: bool = True,
-    judge_provider: str = "openai",
-    judge_model: str = "gpt-4o-mini",
+    judge_provider: str | BaseProvider | None = None,
+    judge_model: str | None = None,
     verbose: bool = True,
+    checks=None,
+    samples: int = 1,
+    bootstrap: int = 1000,
+    seed: int = 0,
+    judge_both_orders: bool = True,
+    similarity: str | None = None,
 ) -> DiffReport:
     """
     Compare two prompt versions across a set of test cases.
 
     Returns a DiffReport with per-case semantic drift, judge verdicts,
-    latency deltas, and an overall regression summary.
+    latency deltas, structural drift, check flips, and an overall regression
+    summary. ``checks`` is a default checks spec for cases without their own.
+    ``samples`` > 1 calls each version that many times per case and reports
+    within-version drift (noise floor) and excess drift. ``bootstrap`` sets the
+    resamples for 95 percent CIs (0 disables); ``seed`` makes them reproducible.
+
+    The judge is any provider name or provider object; with ``None`` it is
+    chosen from the environment (OpenAI if ``OPENAI_API_KEY`` is set, else
+    Anthropic if ``ANTHROPIC_API_KEY`` is set). It runs in both orders and
+    marks disagreements as ``inconsistent`` unless ``judge_both_orders=False``.
+
+    ``similarity`` is ``"tfidf"`` (free, offline, deterministic) or
+    ``"embedding"``. When ``None`` it is ``"embedding"`` only if a config sets
+    ``embedding_model``, otherwise ``"tfidf"``.
     """
+    if samples < 1:
+        raise ValueError("samples must be at least 1")
     cfg_a = load_config(config_a) if not isinstance(config_a, dict) else config_a
     cfg_b = load_config(config_b) if not isinstance(config_b, dict) else config_b
     test_cases = load_cases(cases) if not isinstance(cases, list) else cases
+    if similarity is None:
+        similarity = ("embedding" if cfg_embedding_requested(cfg_a, cfg_b) else "tfidf")
+    if similarity not in ("tfidf", "embedding"):
+        raise ValueError("similarity must be 'tfidf' or 'embedding'")
 
     if verbose:
-        print(f"\n⚡ promptdrift")
+        print("\n⚡ promptdrift")
         print(f"   A : {cfg_a['version']} ({cfg_a['provider']} / {cfg_a['model']})")
         print(f"   B : {cfg_b['version']} ({cfg_b['provider']} / {cfg_b['model']})")
-        print(f"   Cases : {len(test_cases)}   Judge : {'on' if use_judge else 'off'}\n")
+        print(f"   Cases : {len(test_cases)}   Judge : {'on' if use_judge else 'off'}"
+              f"   Samples : {samples}\n")
 
-    prov_a = get_provider(cfg_a["provider"], model=cfg_a["model"])
-    prov_b = get_provider(cfg_b["provider"], model=cfg_b["model"])
-    emb_prov = _resolve_embedder(cfg_a)
-    if emb_prov is None and verbose:
-        print("  ⚠ No embedding provider available, using TF-IDF fallback (offline mode).\n")
+    prov_a = get_provider(cfg_a["provider"], model=cfg_a["model"],
+                          **(cfg_a.get("provider_options") or {}))
+    prov_b = get_provider(cfg_b["provider"], model=cfg_b["model"],
+                          **(cfg_b.get("provider_options") or {}))
+    emb_prov = _resolve_embedder(cfg_a) if similarity == "embedding" else None
+    if similarity == "embedding" and emb_prov is None and verbose:
+        print("  ⚠ No embedding provider available, using TF-IDF similarity instead.\n")
 
-    judge_prov = None
-    if use_judge:
-        try:
-            judge_prov = get_provider(judge_provider, model=judge_model)
-        except Exception:
-            if verbose:
-                print("  ⚠ Judge provider unavailable, skipping judge.\n")
+    judge_prov = resolve_judge(judge_provider, judge_model, verbose) if use_judge else None
 
     report = DiffReport(
         version_a=str(cfg_a["version"]), version_b=str(cfg_b["version"]),
         model_a=cfg_a["model"], model_b=cfg_b["model"],
         total_cases=len(test_cases),
+        n_bootstrap=bootstrap, bootstrap_seed=seed,
+        similarity="embedding" if emb_prov is not None else "tfidf",
     )
 
     for i, case in enumerate(test_cases):
@@ -223,39 +212,21 @@ def compare(
         params_a = {"temperature": cfg_a["temperature"], "max_tokens": cfg_a["max_tokens"]}
         params_b = {"temperature": cfg_b["temperature"], "max_tokens": cfg_b["max_tokens"]}
 
-        prompt_a = cfg_a["prompt_template"].format(input=inp)
-        prompt_b = cfg_b["prompt_template"].format(input=inp)
+        prompt_a = render_prompt(cfg_a["prompt_template"], inp)
+        prompt_b = render_prompt(cfg_b["prompt_template"], inp)
+        resps_a = [prov_a.complete(cfg_a["system"], prompt_a, **params_a) for _ in range(samples)]
+        resps_b = [prov_b.complete(cfg_b["system"], prompt_b, **params_b) for _ in range(samples)]
 
-        resp_a = prov_a.complete(cfg_a["system"], prompt_a, **params_a)
-        resp_b = prov_b.complete(cfg_b["system"], prompt_b, **params_b)
-
-        sim = _embed_pair(emb_prov, resp_a.text, resp_b.text)
-        drift = round(1.0 - sim, 4)
-        level = classify_drift(sim)
-
-        verdict, reasoning = None, None
-        if judge_prov and level != "none":
-            verdict, reasoning = _judge(
-                judge_prov, inp, resp_a.text, resp_b.text,
-                expected=case.get("expected"),
-            )
-            if verdict == "regressed":
-                level = "regression"
-
-        report.cases.append(CaseResult(
-            case_id=case["id"],
-            input=inp,
-            output_a=resp_a.text,
-            output_b=resp_b.text,
-            similarity=round(sim, 4),
-            drift_score=drift,
-            drift_level=level,
-            judge_verdict=verdict,
-            judge_reasoning=reasoning,
-            latency_a=resp_a.latency,
-            latency_b=resp_b.latency,
-            tokens_a=resp_a.input_tokens + resp_a.output_tokens,
-            tokens_b=resp_b.input_tokens + resp_b.output_tokens,
+        texts_a = [r.text for r in resps_a]
+        texts_b = [r.text for r in resps_b]
+        report.cases.append(score_case(
+            case, texts_a if samples > 1 else texts_a[0], texts_b if samples > 1 else texts_b[0],
+            judge=judge_prov, embedder=emb_prov,
+            latency_a=round(sum(r.latency for r in resps_a) / samples, 3),
+            latency_b=round(sum(r.latency for r in resps_b) / samples, 3),
+            tokens_a=sum(r.input_tokens + r.output_tokens for r in resps_a),
+            tokens_b=sum(r.input_tokens + r.output_tokens for r in resps_b),
+            default_checks=checks, judge_both_orders=judge_both_orders,
         ))
 
     return report

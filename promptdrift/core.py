@@ -2,9 +2,10 @@
 Core data models and helpers for promptdrift.
 """
 from __future__ import annotations
+
 import json
 import math
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 
 
 # ── Cosine similarity (pure Python, no numpy needed) ─────────────────────────
@@ -39,12 +40,41 @@ class CaseResult:
     similarity: float       # 0.0–1.0
     drift_score: float      # 1 - similarity
     drift_level: str        # none | minor | moderate | major | regression
-    judge_verdict: str | None = None      # improved | regressed | neutral
+    judge_verdict: str | None = None      # improved | regressed | neutral | inconsistent | error
     judge_reasoning: str | None = None
     latency_a: float = 0.0
     latency_b: float = 0.0
     tokens_a: int = 0
     tokens_b: int = 0
+    similarity_method: str = "tfidf"      # tfidf | embedding | mixed (embedding fell back)
+    # structural drift (see promptdrift.structure)
+    signature_a: str | None = None
+    signature_b: str | None = None
+    format_changed: bool | None = None
+    json_valid_a: bool | None = None
+    json_valid_b: bool | None = None
+    json_validity_changed: bool | None = None
+    length_ratio: float | None = None     # len(B) / len(A), None if A is empty
+    # deterministic checks (see promptdrift.checks); None when the case has no checks
+    checks_passed_a: bool | None = None
+    checks_passed_b: bool | None = None
+    check_flip: str | None = None         # pass_to_fail | fail_to_pass | None
+    check_results_a: list | None = None
+    check_results_b: list | None = None
+    check_pass_rate_a: float | None = None  # share of samples passing (1.0 or 0.0 if n=1)
+    check_pass_rate_b: float | None = None
+    # multi-sample stability; defaults describe a single-sample run
+    n_samples: int = 1
+    samples_a: list | None = None
+    samples_b: list | None = None
+    within_drift_a: float | None = None   # mean pairwise drift among A samples
+    within_drift_b: float | None = None
+    noise_floor: float | None = None      # mean of the within-version drifts
+    excess_drift: float | None = None     # drift_score - noise_floor
+    # judge run in both orders; verdict_ba is already flipped into A-vs-B terms
+    judge_verdict_ab: str | None = None
+    judge_verdict_ba: str | None = None
+    judge_consistent: bool | None = None
 
 
 @dataclass
@@ -55,20 +85,64 @@ class DiffReport:
     model_b: str
     total_cases: int
     cases: list[CaseResult] = field(default_factory=list)
+    mode: str = "live"                    # live (models called) | offline (stored outputs)
+    n_bootstrap: int = 1000               # bootstrap resamples for CIs; 0 disables
+    bootstrap_seed: int = 0
+    similarity: str = "tfidf"             # similarity backend requested: tfidf | embedding
+
+    @staticmethod
+    def _is_regression(c: CaseResult) -> bool:
+        return (c.drift_level == "regression" or c.judge_verdict == "regressed"
+                or c.check_flip == "pass_to_fail")
 
     @property
     def regressions(self) -> list[CaseResult]:
-        return [c for c in self.cases
-                if c.drift_level == "regression" or c.judge_verdict == "regressed"]
+        """Judge said regressed, or a deterministic check went from pass to fail."""
+        return [c for c in self.cases if self._is_regression(c)]
 
     @property
     def improvements(self) -> list[CaseResult]:
-        return [c for c in self.cases if c.judge_verdict == "improved"]
+        """Judge said improved, or a check went from fail to pass (and not a regression)."""
+        return [c for c in self.cases if not self._is_regression(c)
+                and (c.judge_verdict == "improved" or c.check_flip == "fail_to_pass")]
 
     @property
     def neutral(self) -> list[CaseResult]:
-        return [c for c in self.cases
-                if c not in self.regressions and c not in self.improvements]
+        imp = {id(c) for c in self.improvements}
+        return [c for c in self.cases if not self._is_regression(c) and id(c) not in imp]
+
+    @property
+    def inconsistent(self) -> list[CaseResult]:
+        """Cases where the judge gave different verdicts depending on output order."""
+        return [c for c in self.cases if c.judge_verdict == "inconsistent"]
+
+    def judge_summary(self) -> dict | None:
+        """Judge counts, including order inconsistency, or None if nothing was judged."""
+        judged = [c for c in self.cases if c.judge_verdict is not None]
+        if not judged:
+            return None
+        both = [c for c in judged if c.judge_consistent is not None]
+        return {
+            "judged": len(judged),
+            "both_orders": len(both),
+            "inconsistent": len(self.inconsistent),
+            "inconsistency_rate": round(len(self.inconsistent) / len(both), 4) if both else None,
+            "errors": sum(c.judge_verdict == "error" for c in judged),
+        }
+
+    def checks_summary(self) -> dict | None:
+        """Pass rates and flip counts over cases that have checks, or None if none do."""
+        checked = [c for c in self.cases if c.checks_passed_a is not None]
+        if not checked:
+            return None
+        n = len(checked)
+        return {
+            "cases_with_checks": n,
+            "pass_rate_a": round(sum(bool(c.checks_passed_a) for c in checked) / n, 4),
+            "pass_rate_b": round(sum(bool(c.checks_passed_b) for c in checked) / n, 4),
+            "pass_to_fail": sum(c.check_flip == "pass_to_fail" for c in checked),
+            "fail_to_pass": sum(c.check_flip == "fail_to_pass" for c in checked),
+        }
 
     @property
     def avg_drift(self) -> float:
@@ -82,6 +156,87 @@ class DiffReport:
             return 0.0
         return len(self.regressions) / len(self.cases)
 
+    @property
+    def format_changes(self) -> list[CaseResult]:
+        return [c for c in self.cases if c.format_changed]
+
+    @property
+    def json_validity_changes(self) -> list[CaseResult]:
+        return [c for c in self.cases if c.json_validity_changed]
+
+    @property
+    def json_broken(self) -> list[CaseResult]:
+        """Cases where A was valid JSON and B is not."""
+        return [c for c in self.cases if c.json_valid_a and c.json_valid_b is False]
+
+    @property
+    def median_length_ratio(self) -> float | None:
+        ratios = sorted(c.length_ratio for c in self.cases if c.length_ratio is not None)
+        if not ratios:
+            return None
+        mid = len(ratios) // 2
+        if len(ratios) % 2:
+            return ratios[mid]
+        return (ratios[mid - 1] + ratios[mid]) / 2
+
+    def structural_summary(self) -> dict:
+        mlr = self.median_length_ratio
+        return {
+            "format_changes": len(self.format_changes),
+            "format_change_rate": round(len(self.format_changes) / len(self.cases), 4)
+            if self.cases else 0.0,
+            "json_validity_changes": len(self.json_validity_changes),
+            "json_broken": len(self.json_broken),
+            "median_length_ratio": round(mlr, 4) if mlr is not None else None,
+        }
+
+    def stability_summary(self, threshold: float = 0.05) -> dict | None:
+        """Noise floor and excess drift over multi-sample cases, or None if there are none.
+
+        ``cases_above_noise`` counts cases whose excess drift exceeds ``threshold``
+        (the same 0.05 boundary that separates "none" from "minor" drift).
+        """
+        multi = [c for c in self.cases if c.n_samples > 1 and c.excess_drift is not None]
+        if not multi:
+            return None
+        n = len(multi)
+
+        def avg(vals):
+            vals = [v for v in vals if v is not None]
+            return round(sum(vals) / len(vals), 4) if vals else None
+
+        return {
+            "cases": n,
+            "samples_per_side": max(c.n_samples for c in multi),
+            "avg_within_drift_a": avg(c.within_drift_a for c in multi),
+            "avg_within_drift_b": avg(c.within_drift_b for c in multi),
+            "avg_noise_floor": avg(c.noise_floor for c in multi),
+            "avg_excess_drift": avg(c.excess_drift for c in multi),
+            "cases_above_noise": sum(c.excess_drift > threshold for c in multi),
+        }
+
+    def confidence_intervals(self, level: float = 0.95) -> dict | None:
+        """Bootstrap CIs (percentile method, resampling cases) for the headline rates.
+
+        Returns ``{"level", "n_bootstrap", "avg_drift", "regression_rate"}`` plus
+        ``avg_excess_drift`` when cases have multiple samples, each a ``[lo, hi]``
+        list. None when there are no cases or ``n_bootstrap`` is 0.
+        """
+        if not self.cases or self.n_bootstrap <= 0:
+            return None
+        from .stats import bootstrap_cis
+
+        cols = {
+            "avg_drift": [c.drift_score for c in self.cases],
+            "regression_rate": [1.0 if self._is_regression(c) else 0.0 for c in self.cases],
+        }
+        if any(c.excess_drift is not None for c in self.cases):
+            cols["avg_excess_drift"] = [c.excess_drift for c in self.cases]
+        cis = bootstrap_cis(cols, self.n_bootstrap, self.bootstrap_seed, level)
+        out = {"level": level, "n_bootstrap": self.n_bootstrap}
+        out.update({k: [round(lo, 4), round(hi, 4)] for k, (lo, hi) in cis.items()})
+        return out
+
     def to_dict(self) -> dict:
         return {
             "version_a": self.version_a,
@@ -89,12 +244,19 @@ class DiffReport:
             "model_a": self.model_a,
             "model_b": self.model_b,
             "total_cases": self.total_cases,
+            "mode": self.mode,
+            "similarity": self.similarity,
             "summary": {
                 "avg_drift": round(self.avg_drift, 4),
                 "regression_rate": round(self.regression_rate, 4),
                 "regressions": len(self.regressions),
                 "improvements": len(self.improvements),
                 "neutral": len(self.neutral),
+                "structural": self.structural_summary(),
+                "checks": self.checks_summary(),
+                "judge": self.judge_summary(),
+                "stability": self.stability_summary(),
+                "ci": self.confidence_intervals(),
             },
             "cases": [asdict(c) for c in self.cases],
         }

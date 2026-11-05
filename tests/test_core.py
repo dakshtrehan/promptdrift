@@ -1,8 +1,10 @@
 """Tests for promptdrift. No API keys needed."""
 import json
+
 import pytest
-from promptdrift.core import cosine_similarity, classify_drift, CaseResult, DiffReport
-from promptdrift.compare import load_config, load_cases, _tfidf_similarity
+
+from promptdrift.compare import _tfidf_similarity, load_cases, load_config
+from promptdrift.core import CaseResult, DiffReport, classify_drift, cosine_similarity
 from promptdrift.reporter import print_report
 
 
@@ -134,3 +136,12 @@ def test_print_report_smoke(capsys):
     print_report(r)
     out = capsys.readouterr().out
     assert "promptdrift" in out and "v1" in out
+
+
+def test_verdict_lines(capsys):
+    from promptdrift import compare_outputs
+    print_report(compare_outputs([{"case_id": "a", "output_a": "x y", "output_b": "x y"}]))
+    assert "SAFE TO SHIP" in capsys.readouterr().out
+    print_report(compare_outputs([{"case_id": "a", "output_a": "- x y", "output_b": "x y"}]))
+    out = capsys.readouterr().out
+    assert "REVIEW" in out and "format change" in out

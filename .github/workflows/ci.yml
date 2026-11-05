@@ -6,13 +6,17 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
+    name: test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +33,46 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Lint
-        run: ruff check promptdrift/ || true
+        run: ruff check promptdrift/ tests/
 
-      - name: Test
-        run: pytest tests/ -v --cov=promptdrift --cov-report=term-missing
+      - name: Test (no network, all providers mocked)
+        env:
+          OPENAI_API_KEY: ""
+          ANTHROPIC_API_KEY: ""
+        run: pytest -q --cov=promptdrift --cov-report=term-missing --cov-fail-under=90
+
+  minimal:
+    name: core install, no provider SDKs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install core only
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest
+      - name: Offline smoke test
+        run: |
+          promptdrift --version
+          promptdrift diff examples/outputs.jsonl --summary
+          pytest -q
+
+  package:
+    name: build and twine check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check --strict dist/*
+      - name: Install the wheel and run it
+        run: |
+          pip install dist/*.whl
+          cd /tmp && promptdrift --version

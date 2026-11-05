@@ -1,25 +1,26 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "promptdrift"
-version = "0.1.1"
-description = "Semantic diff for LLM prompts and model outputs. Catch regressions before they hit prod."
+dynamic = ["version"]
+description = "Semantic, structural and check-based diff for LLM prompts and model outputs."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Daksh Trehan", email = "dakshtrehan111@gmail.com" }]
 keywords = ["llm", "prompts", "diff", "drift", "testing", "evaluation", "ai", "genai", "semantic", "regression"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Testing",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
@@ -34,11 +35,10 @@ anthropic = ["anthropic>=0.20"]
 all = ["openai>=1.0", "anthropic>=0.20"]
 dev = [
     "pytest>=7.0",
-    "pytest-cov",
-    "black",
-    "ruff",
-    "build",
-    "twine",
+    "pytest-cov>=4.0",
+    "ruff>=0.6",
+    "build>=1.0",
+    "twine>=5.0",
     "openai>=1.0",
     "anthropic>=0.20",
 ]
@@ -53,6 +53,9 @@ Documentation = "https://github.com/dakshtrehan/promptdrift#readme"
 [project.scripts]
 promptdrift = "promptdrift.cli:main"
 
+[tool.setuptools.dynamic]
+version = { attr = "promptdrift.version.__version__" }
+
 [tool.setuptools.packages.find]
 include = ["promptdrift*"]
 
@@ -60,5 +63,18 @@ include = ["promptdrift*"]
 line-length = 100
 target-version = "py39"
 
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["promptdrift"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true

@@ -1,0 +1,5 @@
+{"case_id": "capital", "input": "What is the capital of France?", "expected": "Paris", "output_a": "Paris", "output_b": "The capital of France is Paris.", "checks": {"regex": "Paris"}}
+{"case_id": "percent", "input": "What is 15% of 200?", "expected": "30", "output_a": "30", "output_b": "15% of 200 is 3.", "checks": {"regex": "\\b30\\b"}}
+{"case_id": "extract", "input": "Return the person as JSON with name and age: Ada, 36.", "output_a": "{\"name\": \"Ada\", \"age\": 36}", "output_b": "```json\n{\"name\": \"Ada\", \"age\": 36}\n```", "checks": {"json_keys": ["name", "age"]}}
+{"case_id": "steps", "input": "List three steps to boil an egg.", "output_a": "1. Boil water\n2. Add the egg\n3. Cook for 9 minutes", "output_b": "Boil water, add the egg and cook it for about nine minutes."}
+{"case_id": "reverse", "input": "Write a Python one-liner to reverse a string called s.", "output_a": ["s[::-1]", "s[::-1]", "''.join(reversed(s))"], "output_b": ["s[::-1]", "''.join(reversed(s))", "s[::-1]"]}
