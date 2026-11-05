@@ -247,6 +247,6 @@ def test_no_dashes_in_examples_and_benchmark():
         for p in d.rglob("*"):
             if p.is_file() and p.suffix in {".md", ".py", ".yml", ".yaml", ".sh", ".jsonl", ".json", ".txt"}:
                 text = p.read_text(encoding="utf-8")
-                if "—" in text or "–" in text:
+                if "\u2014" in text or "\u2013" in text:  # em dash, en dash
                     bad.append(str(p.relative_to(ROOT)))
     assert not bad, bad

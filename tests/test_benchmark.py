@@ -128,7 +128,7 @@ def test_main_writes_results_and_json(bench, tmp_path, capsys):
     assert "Embedding leg: **not run**" in text
     assert "## Run notes" in text and "unit test run" in text
     assert "## Hardest pairs for TF-IDF" in text
-    assert "—" not in text and "–" not in text
+    assert "\u2014" not in text and "\u2013" not in text  # em dash, en dash
     assert json.loads(raw.read_text())["pairs"] == 20
 
 
@@ -210,4 +210,4 @@ def test_results_md_is_from_a_real_run(bench):
     res = bench.run(bench.load_pairs(bench.DEFAULT_DATA), use_embeddings=False)
     m = res["methods"]["tfidf"]
     assert f"| TF-IDF (promptdrift default) | 200 | {m['auc']:.3f} | {m['best_threshold']:.3f} |" in text
-    assert "—" not in text
+    assert "\u2014" not in text  # em dash
