@@ -32,6 +32,7 @@ dependencies = [
 [project.optional-dependencies]
 openai = ["openai>=1.0"]
 anthropic = ["anthropic>=0.20"]
+watch = ["watchdog>=3.0"]
 all = ["openai>=1.0", "anthropic>=0.20"]
 dev = [
     "pytest>=7.0",
@@ -53,8 +54,15 @@ Documentation = "https://github.com/dakshtrehan/promptdrift#readme"
 [project.scripts]
 promptdrift = "promptdrift.cli:main"
 
+[project.entry-points.pytest11]
+# a thin shim that imports promptdrift.pytest_plugin only when --promptdrift is used
+promptdrift = "_promptdrift_pytest"
+
 [tool.setuptools.dynamic]
 version = { attr = "promptdrift.version.__version__" }
+
+[tool.setuptools]
+py-modules = ["_promptdrift_pytest"]
 
 [tool.setuptools.packages.find]
 include = ["promptdrift*"]

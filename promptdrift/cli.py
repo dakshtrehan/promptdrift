@@ -8,6 +8,7 @@ Usage:
   promptdrift diff outputs.jsonl                     # offline, no model calls
   promptdrift diff outputs.jsonl --html report.html  # self-contained HTML report
   promptdrift diff outputs.jsonl --csv cases.csv --junit junit.xml  # CI exports
+  promptdrift watch diff outputs.jsonl               # re-run on file changes
   promptdrift init --dir ./prompts
 """
 from __future__ import annotations
@@ -137,6 +138,29 @@ def cmd_diff(args):
     _emit(report, args)
 
 
+def cmd_watch(args, parser):
+    """Re-run compare or diff whenever one of its input files changes."""
+    from .watch import COST_WARNING, run_watch
+
+    inner = parser.parse_args([args.wrapped] + list(args.wrapped_args))
+    if inner.command == "compare":
+        paths = [inner.config_a, inner.config_b, inner.cases]
+        run = cmd_compare
+        warning = COST_WARNING
+    else:
+        paths = [inner.outputs]
+        run = cmd_diff
+        warning = COST_WARNING if inner.judge else None
+    if inner.checks:
+        paths.append(inner.checks)
+    if args.interval <= 0:
+        parser.error("--interval must be a positive number of seconds")
+    code = run_watch(lambda: run(inner), paths, label=inner.command, interval=args.interval,
+                     clear=args.clear, once=args.once, warning=warning)
+    if code:
+        sys.exit(code)
+
+
 def cmd_init(args):
     """Scaffold example prompt configs and test cases."""
     import yaml
@@ -255,6 +279,7 @@ examples:
   promptdrift compare v1.yaml v2.yaml --cases golden.json --json -o report.json
   promptdrift diff outputs.jsonl --name-a old --name-b new
   promptdrift diff outputs.jsonl --html report.html --csv cases.csv --junit junit.xml
+  promptdrift watch --clear diff outputs.jsonl --summary
   promptdrift init --dir ./prompts
         """,
     )
@@ -289,6 +314,17 @@ examples:
     _add_output_args(dp)
     dp.add_argument("--verbose", "-v", action="store_true", help="Show per-case progress")
 
+    # watch (wraps compare or diff)
+    wp = sub.add_parser("watch", help="Re-run compare or diff whenever an input file changes")
+    wp.add_argument("--interval", type=float, default=1.0, metavar="SECONDS",
+                    help="Polling interval in seconds (default 1.0)")
+    wp.add_argument("--clear", action="store_true", help="Clear the terminal before each run")
+    wp.add_argument("--once", action="store_true", help="Run once and exit")
+    wp.add_argument("wrapped", choices=["compare", "diff"], metavar="{compare,diff}",
+                    help="Command to re-run")
+    wp.add_argument("wrapped_args", nargs=argparse.REMAINDER, metavar="args",
+                    help="Arguments for the wrapped command")
+
     # init
     ip = sub.add_parser("init", help="Scaffold example files")
     ip.add_argument("--dir", default="./prompts", help="Output directory (default: ./prompts)")
@@ -298,6 +334,8 @@ examples:
         cmd_compare(args)
     elif args.command == "diff":
         cmd_diff(args)
+    elif args.command == "watch":
+        cmd_watch(args, parser)
     elif args.command == "init":
         cmd_init(args)
     else:
