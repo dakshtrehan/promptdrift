@@ -95,7 +95,7 @@ def test_verdict_summary_tags_and_cases():
     assert "- A: `a b`" in md and "- B: `x y`" in md
     assert "[full HTML report in the run artifacts](https://example.invalid/run/1)" in md
     assert "| Judge |" not in md
-    assert "—" not in md and "–" not in md
+    assert chr(0x2014) not in md and chr(0x2013) not in md
 
 
 def test_judge_rows_and_reasoning_are_escaped():

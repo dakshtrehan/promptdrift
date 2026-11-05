@@ -293,7 +293,7 @@ def test_action_metadata_and_declared_inputs():
         assert re.fullmatch(r"inputs\.[\w-]+|github\.action_path|steps\.[\w-]+\.outputs\.[\w-]+"
                             r"|always\(\).*", e), e
     assert "set-output" not in ACTION_YML.read_text()
-    assert "—" not in ACTION_YML.read_text() and "–" not in ACTION_YML.read_text()
+    assert chr(0x2014) not in ACTION_YML.read_text() and chr(0x2013) not in ACTION_YML.read_text()
 
 
 def test_every_declared_output_is_set_by_summarize(tmp_path):

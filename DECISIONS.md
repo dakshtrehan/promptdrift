@@ -430,3 +430,58 @@ So that parallel work fits together, these names were fixed in advance:
   apart and the non-paraphrases it scores close, and says plainly that TF-IDF
   is a change detector, not a paraphrase detector, which is why checks, noise
   floors and the judge exist.
+
+## D-A. Workstream A: reusable GitHub Action, thresholds and Markdown
+
+* `promptdrift.thresholds.evaluate_thresholds` and
+  `promptdrift.markdown.render_markdown` accept either a `DiffReport` or the
+  dict written by `--output` (`DiffReport.to_dict()`), so the action's
+  `summarize.py` works from `report.json` without re-running anything.
+  `markdown.report_from_dict` rebuilds a `DiffReport` with `n_bootstrap=0`
+  (the seed is not stored) and the stored `summary.ci` is reused, which keeps
+  the comment byte-identical to what the CLI computed.
+* `--max-drift` is a fraction on the `avg_drift` scale (0.1 is 10 percent),
+  the other limits are inclusive counts. Breaches print one sentence each to
+  stderr and exit 1; `--fail-on-regression` keeps its silent exit 1 so v0.2.0
+  scripts see no new output. `fail_on_regression=True` in
+  `evaluate_thresholds` produces its own sentence so the action can show it.
+* Markdown escaping: text goes through `html.escape` plus backslashes on
+  `` \ ` * _ [ ] ~ | ``; outputs go into code spans whose fence is one
+  backtick longer than the longest run inside, with newlines collapsed, `<`
+  `>` `&` as entities and `|` escaped inside table cells. Case output never
+  starts a line, so no HTML block (`</details>`) can open. `render_markdown`
+  takes an extra trailing `failures=` list on top of the agreed signature.
+  `verdict` emoji: check mark, warning sign, cross mark.
+* Action design: inputs reach bash only as environment variables and are
+  appended to an argv array, never eval'd; `extra-args` is split on
+  whitespace (documented, no quoting). The run step always writes
+  `report.json`, `report.html`, `report.junit.xml` and `report.csv` into an
+  absolute `report-dir`, captures the exit code into a step output and never
+  fails by itself; the last step (`if: always()`) exits with that code after
+  printing `threshold-failures.txt`. `summarize.py` is stdlib only, reads
+  `INPUT_*` and `GITHUB_*` from the environment, re-evaluates the thresholds
+  from `report.json`, writes outputs with `GITHUB_OUTPUT` heredoc syntax for
+  multi-line values, and upserts the comment by paging issue comments
+  (`per_page=100`, `Link: rel="next"`) for the marker. HTTP 401/403/404 on
+  the comment (fork PRs) become a `::warning::` and an empty `comment-id`;
+  events without a PR number print a `::notice::` and skip the comment.
+* The `verdict` output is `fail` when a threshold breached, promptdrift
+  exited non zero, or the report verdict is DO NOT SHIP, even if the job
+  passes (as in the dogfood workflow with `fail-on-regression: "false"`).
+  `review` and `ship` follow `reporter.verdict_for`; a summary-only dict
+  without `cases` uses the same rule computed from the summary numbers.
+* Tests: no Docker, so `tests/test_action.py` carries a mocked runner that
+  executes the composite `run` steps with bash, substitutes `inputs.*`,
+  `github.action_path`, `github.token` and `steps.*.outputs.*` (recursively,
+  so the `${{ github.token }}` default resolves), honours `always()` and a
+  single `inputs.x == 'y'` clause, and raises on anything else so a change to
+  action.yml that needs more is noticed. A fake `promptdrift` on PATH records
+  argv for the live-mode command without any provider. The fake GitHub API is
+  a `ThreadingHTTPServer` on 127.0.0.1 with `NO_PROXY` set.
+* Found, not fixed (not my files): the `pytest11` entry point added by
+  workstream C imports `promptdrift` before pytest-cov starts, so
+  `pytest --cov` under-reports import-time lines of every module (total showed
+  83 percent with the plugin registered, 100 percent for my modules with
+  `-p no:promptdrift`). Hardening should either run coverage with
+  `coverage run -m pytest`, pass `-p no:promptdrift` in CI, or make the plugin
+  module import `promptdrift` lazily.
