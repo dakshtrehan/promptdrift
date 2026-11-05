@@ -773,3 +773,27 @@ Group A covered library code, tests and pyproject. Each code fix has a test.
 - tests-2: `AnthropicProvider` passes `api_key=None` when the key is blank, so the SDK's own credential lookup runs and fails before any request when nothing is configured (and ANTHROPIC_AUTH_TOKEN works again). No ValueError was added, because that would break token, profile and gateway users that work in v0.2.0. OpenAIProvider is unchanged (its SDK already rejects a blank key).
 - tests-3: the docs-test guard checks the whole argv for `compare` and `--judge`, the README guard checks the shell words of every line, and both test environments point OPENAI_BASE_URL and ANTHROPIC_BASE_URL at 127.0.0.1:9 so an accidental live call fails locally.
 - tests-4: `_promptdrift_pytest` is in `[tool.coverage.run] source`, and a pytester test covers the shim's fixture branch, which wins under `-p promptdrift.pytest_plugin --promptdrift FILE`; the branch stays (deleting it would break that documented usage) and the shim's docstring says when it wins. CI passes `--cov=` flags, which override `source`, so group B needs to add `--cov=_promptdrift_pytest` to ci.yml for CI to measure it.
+
+## D17. Adversarial review pass
+
+Six reviewers with separate lenses (library correctness, the Action on a real
+runner, v0.2.0 compatibility, test honesty, docs accuracy, and hostile input)
+raised 43 findings. A separate skeptic tried to refute each one. 41 were
+confirmed and 2 were refuted:
+
+* "unpinned installs resolve to v0.1.1 on main" is true but follows from the
+  stacked PR order, and it goes away once v0.2.0 and v0.3.0 merge.
+* "a backslash before a pipe breaks the tag table" did not reproduce.
+
+Two fixers over disjoint files fixed 37 of the 41. Their sections above list
+each one. Left for later, with reasons recorded by the fixers:
+
+* No cap on HTML report size for very large reports (tens of thousands of
+  cases). The search is now debounced and cached, so the page stays usable.
+* No retry with backoff for GitHub API 429 and 5xx responses. The comment is
+  now best effort, so those responses log a warning instead of failing the job.
+
+A gate agent then reran every check, including a 3.9 run and a wheel installed
+outside the repo. The orchestrator also added `--cov=_promptdrift_pytest` to CI
+so the pytest shim's tested branches are measured, and moved commit trailers
+that one fixer had placed mid-message to the end of those unpushed commits.

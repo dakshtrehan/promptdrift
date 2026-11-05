@@ -45,7 +45,7 @@ jobs:
 
       - name: Test with coverage (no network, every provider mocked)
         run: >
-          pytest -q --cov=promptdrift --cov=action
+          pytest -q --cov=promptdrift --cov=action --cov=_promptdrift_pytest
           --cov-report=term-missing --cov-fail-under=90
 
   typecheck:
