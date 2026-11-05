@@ -112,21 +112,24 @@ def threshold_failures(report: Optional[dict], env: Mapping[str, str]) -> list[s
 
 def verdict_status(report: dict) -> str:
     """``safe`` / ``review`` / ``do_not_ship`` from a report dict, matching reporter.verdict_for."""
-    try:
-        from promptdrift.markdown import report_from_dict
-        from promptdrift.reporter import verdict_for
-        return verdict_for(report_from_dict(report))[0]
-    except ImportError:
-        s = report.get("summary") or {}
-        if int(s.get("regressions") or 0) > 0:
-            return "do_not_ship"
-        structural = s.get("structural") or {}
-        judge = s.get("judge") or {}
-        if (round(float(s.get("avg_drift") or 0.0) * 100, 1) >= 5
-                or int(structural.get("format_changes") or 0) > 0
-                or int(judge.get("inconsistent") or 0) > 0):
-            return "review"
-        return "safe"
+    if "cases" in report:
+        try:
+            from promptdrift.markdown import report_from_dict
+            from promptdrift.reporter import verdict_for
+            return verdict_for(report_from_dict(report))[0]
+        except ImportError:
+            pass
+    # summary only (or promptdrift not importable): same rule as reporter.verdict_for
+    s = report.get("summary") or {}
+    if int(s.get("regressions") or 0) > 0:
+        return "do_not_ship"
+    structural = s.get("structural") or {}
+    judge = s.get("judge") or {}
+    if (round(float(s.get("avg_drift") or 0.0) * 100, 1) >= 5
+            or int(structural.get("format_changes") or 0) > 0
+            or int(judge.get("inconsistent") or 0) > 0):
+        return "review"
+    return "safe"
 
 
 def build_outputs(report: Optional[dict], exit_code: int, failures: list[str],
